@@ -1,0 +1,11 @@
+{
+  "newsSources": [
+    "ai-news",
+    "tech-crunch",
+    "machine-learning-weekly"
+  ],
+  "maxItems": 5,
+  "messageTemplate": "daily-news",
+  "retryAttempts": 3,
+  "retryDelay": 5000
+}

@@ -1,0 +1,226 @@
+/* Scene Shell — Film-grade animation system */
+/* Scene Shell — 动画系统样式（源自 scene-shell/styles.css 重构） */
+
+/* ─── 公共变量 ─── */
+:root {
+  --scene-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --scene-ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+  --scene-ease-mo: cubic-bezier(0.65, 0, 0.35, 1);
+  --scene-duration-enter: 620ms;
+  --scene-duration-morph: 520ms;
+  --scene-duration-exit: 420ms;
+}
+
+/* ─── Surface 基类 ─── */
+.scene-surface {
+  position: relative;
+  pointer-events: auto;
+  transition:
+    opacity var(--scene-duration-enter) var(--scene-ease-out),
+    transform var(--scene-duration-enter) var(--scene-ease-out),
+    box-shadow var(--scene-duration-morph) var(--scene-ease-mo);
+}
+
+/* ─── 入场 ─── */
+.scene-surface.is-entering {
+  animation: scene-enter var(--scene-duration-enter) var(--scene-ease-out) both;
+}
+@keyframes scene-enter {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ─── 出场 ─── */
+.scene-surface.is-exiting {
+  animation: scene-exit var(--scene-duration-exit) var(--scene-ease-in) both;
+  pointer-events: none;
+}
+@keyframes scene-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.94);
+  }
+}
+
+/* ─── 变形 ─── */
+.scene-surface.is-morphing {
+  transition:
+    opacity var(--scene-duration-morph) var(--scene-ease-mo),
+    transform var(--scene-duration-morph) var(--scene-ease-mo),
+    background var(--scene-duration-morph) var(--scene-ease-mo),
+    box-shadow var(--scene-duration-morph) var(--scene-ease-mo);
+}
+
+/* ─── Intent 权重 ─── */
+.scene-intent-ambient {
+  opacity: 0.7;
+  transform: scale(0.92);
+  transform-origin: bottom right;
+}
+.scene-intent-ambient.is-entering {
+  transform: scale(0.92) translateY(16px);
+  animation-name: scene-enter-ambient;
+}
+@keyframes scene-enter-ambient {
+  from { opacity: 0; transform: scale(0.92) translateY(16px); }
+  to { opacity: 0.7; transform: scale(0.92) translateY(0); }
+}
+
+.scene-intent-confront {
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.3),
+              0 0 20px rgba(168, 85, 247, 0.1);
+}
+
+/* ─── 延迟交错 (stagger) ─── */
+.scene-surface[data-stagger="1"] { animation-delay: 60ms; }
+.scene-surface[data-stagger="2"] { animation-delay: 120ms; }
+.scene-surface[data-stagger="3"] { animation-delay: 180ms; }
+.scene-surface[data-stagger="4"] { animation-delay: 240ms; }
+.scene-surface[data-stagger="5"] { animation-delay: 300ms; }
+
+/* ─── prefers-reduced-motion ─── */
+@media (prefers-reduced-motion: reduce) {
+  .scene-surface,
+  .scene-surface.is-entering,
+  .scene-surface.is-exiting,
+  .scene-surface.is-morphing {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ─── 具体卡片种类样式 ─── */
+
+/* 天气卡片 */
+.scene-weather {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  z-index: var(--z-scene-shell);
+  min-width: 180px;
+  max-width: 280px;
+}
+.scene-weather .weather-temp { font-size: 36px; font-weight: 300; line-height: 1; }
+.scene-weather .weather-cond { font-size: 14px; opacity: 0.7; }
+.scene-weather .weather-icon { font-size: 40px; }
+
+/* 天气卡片入场/出场动画 - 右上角滑入 */
+[data-kind="weather"].is-entering {
+  animation: weather-enter var(--scene-duration-enter) var(--scene-ease-out) both !important;
+}
+[data-kind="weather"].is-exiting {
+  animation: weather-exit var(--scene-duration-exit) var(--scene-ease-in) both !important;
+}
+@keyframes weather-enter {
+  from { opacity: 0; transform: translateX(64px) scale(0.88); }
+  to   { opacity: 1; transform: translateX(0) scale(0.92); }
+}
+@keyframes weather-exit {
+  from { opacity: 1; transform: translateX(0) scale(0.92); }
+  to   { opacity: 0; transform: translateX(72px) scale(0.9); }
+}
+
+/* 唤醒卡片 */
+.scene-awakening {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(24, 24, 36, 0.88);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+.scene-awakening .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #59a8ff;
+  animation: scene-dot-pulse 1.5s ease-in-out infinite;
+}
+@keyframes scene-dot-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+.scene-awakening .dot:nth-child(2) { animation-delay: 0.2s; }
+.scene-awakening .dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* 自检卡片 */
+.scene-selfcheck {
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(24, 24, 36, 0.92);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.scene-selfcheck .scan-line {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(89, 168, 255, 0.6), transparent);
+  animation: scene-scan 2s ease-in-out infinite;
+}
+@keyframes scene-scan {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* 图片卡片 */
+.scene-image img {
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.scene-image img.loaded { opacity: 1; }
+
+/* ─── P4 戏剧强度：confront 镜头聚焦（周边暗化 + 卡放大 + 光晕脉冲） ─── */
+/* 根容器无 scene-root class（仅 Tailwind 工具类），data-focus 属性全站唯一 → 直接属性选择器 */
+[data-focus='confront'] .scene-surface:not(.scene-intent-confront) {
+  opacity: 0.45;
+  transform: scale(0.97);
+  filter: saturate(0.6) brightness(0.8);
+  transition: opacity 0.4s ease, transform 0.4s ease, filter 0.4s ease;
+}
+/* :not(.is-entering/.is-exiting) 保证光晕脉冲不覆盖入场/出场动画（同权重时后定义者胜） */
+.scene-surface.scene-intent-confront:not(.is-entering):not(.is-exiting) {
+  transform: scale(1.03);
+  box-shadow:
+    0 0 0 1px rgba(249, 115, 22, 0.35),
+    0 0 32px rgba(249, 115, 22, 0.22);
+  animation: scene-confront-pulse 2.6s ease-in-out infinite;
+}
+@keyframes scene-confront-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.35), 0 0 32px rgba(249, 115, 22, 0.22); }
+  50% { box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.55), 0 0 44px rgba(249, 115, 22, 0.34); }
+}
+/* ambient 呼吸强化（原 .scene-intent-ambient 基础上补光晕） */
+.scene-surface.scene-intent-ambient {
+  opacity: 0.88;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scene-surface.scene-intent-confront:not(.is-entering):not(.is-exiting) { animation: none; }
+}
+
+/* ─── KPI 段脉冲高亮（P7 Task9） ─── */
+.kpi-pulse {
+  animation: kpi-glow 0.6s ease-in-out infinite alternate;
+}
+@keyframes kpi-glow {
+  from {
+    text-shadow: 0 0 8px rgba(255, 215, 0, 0.4), 0 0 16px rgba(255, 215, 0, 0.15);
+  }
+  to {
+    text-shadow: 0 0 16px rgba(255, 215, 0, 0.7), 0 0 32px rgba(255, 215, 0, 0.3), 0 0 48px rgba(255, 215, 0, 0.1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kpi-pulse { animation: none; }
+}

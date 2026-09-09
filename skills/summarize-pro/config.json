@@ -1,0 +1,29 @@
+{
+  "name": "summarize-pro",
+  "version": "1.0.0",
+  "description": "文本摘要专家，20种格式支持",
+  "enabled": true,
+  "trigger": [
+    "总结", "摘要", "summarize", "summary",
+    "tldr", "tl;dr", "一句话",
+    "要点", "关键点", "key takeaways",
+    "行动项目", "待办", "action items",
+    "子弹", "bullets",
+    "执行摘要", "executive summary",
+    "会议摘要", "meeting summary",
+    "邮件摘要", "email summary",
+    "对比", "compare",
+    "eli5", "简单解释",
+    "保存摘要", "save summary",
+    "摘要历史", "summary history"
+  ],
+  "permissions": ["read", "write"],
+  "config": {
+    "default_format": "bullets",
+    "default_length": "medium",
+    "default_language": "chinese",
+    "max_history": 100,
+    "auto_detect": true,
+    "show_stats": true
+  }
+}

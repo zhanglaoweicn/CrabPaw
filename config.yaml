@@ -1,0 +1,181 @@
+﻿# CrabPaw 配置文件
+# 版本: 2.0.0
+
+# 系统配置
+system:
+  version: "2.0.0"
+  language: "zh-CN"
+  timezone: "Asia/Shanghai"
+  logLevel: "info"  # debug, info, warn, error
+  dataDir: "./data/.crabpaw"
+
+# 模型配置
+models:
+  provider: "deepseek"
+  model: "deepseek-chat"
+  temperature: 0.7
+  maxTokens: 4000
+  providers:
+    deepseek:
+      apiKey: "${DEEPSEEK_API_KEY}"
+      baseUrl: "https://api.deepseek.com"
+      models:
+        - "deepseek-chat"
+        - "deepseek-coder"
+    qwen:
+      apiKey: "${QWEN_API_KEY}"
+      baseUrl: "https://dashscope.aliyuncs.com/api/v1"
+      models:
+        - "qwen-turbo"
+        - "qwen-plus"
+        - "qwen-max"
+
+# TTS 配置
+tts:
+  enabled: true
+  provider: "edge-tts"  # edge-tts, piper
+  voice: "zh-CN-XiaoxiaoNeural"
+  speed: 1.0
+  providers:
+    edge-tts:
+      voice: "zh-CN-XiaoxiaoNeural"
+      voices:
+        - "zh-CN-XiaoxiaoNeural"  # 晓晓（女声）
+        - "zh-CN-YunxiNeural"     # 云希（男声）
+        - "zh-CN-YunyangNeural"   # 云扬（男声）
+    piper:
+      modelPath: "./models/piper"
+      model: "zh_CN-huayan-medium"
+      models:
+        - "zh_CN-huayan-medium"      # 华燕（中等质量）
+        - "zh_CN-huayan-x_low"       # 华燕（低质量，快速）
+
+# 语音回复配置
+voiceReply:
+  enabled: true
+  refineEnabled: true  # 是否提炼语音回复
+  maxLength: 150  # 最大字符数
+  evolutionEnabled: true  # 是否启用语音回复进化
+
+# 记忆配置
+memory:
+  enabled: true
+  provider: "local"  # local, sqlite
+  maxSize: "1GB"
+  retentionDays: 90
+  features:
+    crossSession: true  # 跨会话记忆
+    userProfile: true   # 用户画像
+    semanticSearch: true  # 语义搜索
+
+# 进化配置
+evolution:
+  enabled: true
+  autoEvolve: true  # 自动进化
+  evolutionInterval: 86400000  # 进化间隔（毫秒），默认 24 小时
+  feedbackInterval: 3600000  # 反馈收集间隔（毫秒），默认 1 小时
+  maxEvolutionSteps: 10  # 单次进化最大步数
+  modules:
+    tools: true
+    skills: true
+    memory: true
+    config: true
+    tts: true
+    tests: false  # 测试进化默认关闭
+
+# 工具配置
+tools:
+  enabled: true
+  safetyLevel: "medium"  # low, medium, high
+  approvalRequired: true  # 危险操作需要审批
+  enabledCategories:
+    - file
+    - code
+    - network
+    - data
+    - ai
+    - system
+    - collaboration
+    - china
+  disabledTools: []  # 禁用的工具列表
+
+# 技能配置
+skills:
+  enabled: true
+  autoCreate: true  # 自动创建技能
+  autoEvolve: true  # 技能自我进化
+  marketEnabled: true  # 技能市场
+  maxSkills: 100  # 最大技能数量
+  minQuality: 0  # 技能推荐质量阈值(0..1, 0=不过滤; 质量=成功率派生乘数, 非 0..5 星级)
+
+
+# 技能市场注册中心
+skillRegistries:
+  - name: clawhub
+    type: http
+    url: https://clawhub.io/api/v1/skills
+    enabled: true
+  - name: github-skills
+    type: github
+    url: gh:awesome-crabpaw/skills
+    enabled: true
+  - name: local-dev
+    type: local
+    path: ./dev-skills
+    enabled: false
+
+plugins:
+  enabled: true
+  autoLoad: true  # 自动加载插件
+  pluginDir: "./plugins"
+
+# 平台配置
+platforms:
+  wecom:
+    enabled: false
+    corpId: "${WECOM_CORP_ID}"
+    agentId: "${WECOM_AGENT_ID}"
+    secret: "${WECOM_SECRET}"
+    token: "${WECOM_TOKEN}"
+    encodingAESKey: "${WECOM_ENCODING_AES_KEY}"
+  
+  feishu:
+    enabled: false
+    appId: "${FEISHU_APP_ID}"
+    appSecret: "${FEISHU_APP_SECRET}"
+    verificationToken: "${FEISHU_VERIFICATION_TOKEN}"
+    encryptKey: "${FEISHU_ENCRYPT_KEY}"
+
+# 测试配置
+testing:
+  enabled: false
+  autoGenerate: false  # 自动生成测试
+  coverageThreshold: 80  # 测试覆盖率阈值
+  reportDir: "./test-reports"
+
+# 日志配置
+logging:
+  level: "info"
+  file: "./logs/crabpaw.log"
+  maxSize: "10MB"
+  maxFiles: 5
+  format: "json"  # json, text
+
+# 浏览器配置
+browser:
+  enabled: true
+  headless: true
+  defaultProfile: "default"
+  stealthEnabled: true
+  dataSources: "./data/data-sources.json"
+  maxConcurrentPages: 3
+  pageTimeout: 30000
+  visionModel: "auto"  # 视觉提取使用的模型
+
+# 监控配置
+monitoring:
+  enabled: true
+  metricsPort: 9090
+  healthCheckPort: 8080
+  collectInterval: 60000  # 收集间隔（毫秒）
+

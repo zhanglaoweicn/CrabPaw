@@ -1,0 +1,116 @@
+/* ShellFloatCard — 首页浮动玻璃卡壳样式（2026-08-31 M1）
+ *
+ * 玻璃基线: rgba 深空基底 + 细描边 + 内发光 —— 大卡默认无 blur
+ * (MediaStage 事故：大面积 backdrop-filter 与视频/地图合成层死锁 → 黑屏)。
+ * 小卡可按需 blur="sm"(8px)/"md"(12px)。
+ */
+/* 2026-08-31 液态玻璃（Mac Liquid Glass 风）: 半透基底 + backdrop 模糊/增饱和 +
+   高光上缘 + 青色氛染。视频面板打开时 body.side-sheet-media 全局降级为实底
+   (MediaStage 8-22 大卡 blur+视频合成层黑屏事故护栏)。 */
+/* ═══ 2026-08-31 WWDC25 Liquid Glass 风格（蓝紫液态玻璃）═══
+   参考图例: 高圆角半透玻璃板 + 蓝紫渐晕 + 白色上缘高光 + 柔光边——仅样式,未引入位移滤波。 */
+.sfc {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  background: linear-gradient(165deg,
+    rgba(255, 255, 255, 0.035),
+    rgba(130, 140, 190, 0.09) 46%,
+    rgba(255, 255, 255, 0.03) 100%);
+  backdrop-filter: blur(15px) saturate(1.35);
+  -webkit-backdrop-filter: blur(15px) saturate(1.35);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 0 14px rgba(255, 255, 255, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.36),
+    inset 0 0 14px rgba(255, 255, 255, 0.05),
+    inset 0 -20px 30px rgba(0, 0, 0, 0.10);
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+  animation: sfc-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sfc--blur-none { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.sfc--blur-sm { backdrop-filter: blur(14px) saturate(1.5); -webkit-backdrop-filter: blur(14px) saturate(1.5); }
+.sfc--blur-md { backdrop-filter: blur(18px) saturate(1.5); -webkit-backdrop-filter: blur(18px) saturate(1.5); }
+
+/* 视频面板打开 → 三卡降级为无 blur 实底玻璃(防合成层黑屏) */
+body.side-sheet-media .sfc {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: linear-gradient(165deg,
+    rgba(148, 163, 255, 0.06),
+    rgba(40, 46, 100, 0.88) 42%,
+    rgba(110, 130, 235, 0.06) 100%);
+}
+
+.sfc--dragging {
+  user-select: none;
+  transition: none;
+}
+
+.sfc-title {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary, #9fb6cc);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(30, 36, 60, 0.18);
+  cursor: grab;
+  user-select: none;
+}
+
+.sfc-grip {
+  margin-left: auto;
+  opacity: 0.45;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.sfc-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+@keyframes sfc-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sfc { animation: none; }
+  .sfc--blur-sm, .sfc--blur-md { backdrop-filter: none; }
+}
+
+html[data-accessibility="large"] .sfc--blur-sm,
+html[data-accessibility="large"] .sfc--blur-md {
+  backdrop-filter: none;
+}
+
+/* ─── 裸卡态: 无边线/无底色/无投影(语音球实验) ─── */
+.sfc--bare {
+  border: none;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+.sfc--bare .sfc-title {
+  background: transparent;
+  border-bottom: none;
+  justify-content: center;
+}
+.sfc--bare .sfc-grip { display: none; }

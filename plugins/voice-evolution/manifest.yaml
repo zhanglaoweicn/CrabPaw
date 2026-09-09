@@ -1,0 +1,12 @@
+name: voice-evolution
+version: "1.0.0"
+kind: plugin
+description: "语音进化系统 — 自动优化语音回复风格和场景映射"
+author: "CrabPaw Core"
+license: MIT
+lifecycle:
+  init: onLoad
+  start: onStart
+  stop: onStop
+# 2026-08-25 S1：contributes.ui 已弃用（前端 PluginBridge 已移除，注册即死链）
+platforms: [windows, linux, macos]

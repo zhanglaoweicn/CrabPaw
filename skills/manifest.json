@@ -1,0 +1,121 @@
+{
+  "version": "1.0.0",
+  "noExecutor": [
+    "shell-enhance",
+    "file-manager",
+    "file-organizer",
+    "browser-use",
+    "system",
+    "system-info",
+    "core",
+    "desktop-control",
+    "windows-ui-automation",
+    "agent-browser",
+    "doc-processor",
+    "markdown-converter",
+    "wechat-article-search",
+    "bilibili-knowledge",
+    "email-assistant",
+    "meeting-summary"
+  ],
+  "bundles": {
+    "core": {
+      "description": "系统核心技能（必需）",
+      "skills": [
+        "shell-enhance",
+        "file-manager",
+        "file-organizer",
+        "browser-use",
+        "system",
+        "system-info",
+        "core",
+        "desktop-control",
+        "windows-ui-automation",
+        "agent-browser"
+      ],
+      "required": true
+    },
+    "office": {
+      "description": "办公文档处理",
+      "skills": [
+        "word-docx",
+        "excel-xlsx",
+        "powerpoint-pptx",
+        "pdf-generator",
+        "doc-processor",
+        "markdown-converter",
+        "report-generator"
+      ],
+      "required": true
+    },
+    "channels": {
+      "description": "通信渠道集成",
+      "skills": [
+        "wecom-daily-news",
+        "wechat-article-search",
+        "email-assistant",
+        "meeting-summary"
+      ],
+      "required": true
+    },
+    "dev": {
+      "description": "开发者工具",
+      "skills": [
+        "git-ops",
+        "code-review",
+        "systematic-debugging",
+        "test-driven-development",
+        "api-tester",
+        "development",
+        "skill-creator",
+        "prompt-engineering-expert"
+      ],
+      "required": false
+    },
+    "data": {
+      "description": "数据分析与监控",
+      "skills": [
+        "multi-search-engine",
+        "trending-monitor",
+        "price-monitor",
+        "product-research",
+        "weather",
+        "review-analyzer"
+      ],
+      "required": false
+    },
+    "productivity": {
+      "description": "效率工具",
+      "skills": [
+        "scheduled-task",
+        "workflow-automator",
+        "self-improving-agent",
+        "knowledge-base",
+        "content-planner",
+        "article-writer",
+        "summarize-pro",
+        "image-analyze",
+        "image-editor",
+        "listing-optimizer",
+        "promo-planner",
+        "healthcheck",
+        "hot-now",
+        "brainstorming",
+        "productivity",
+        "remotion-video",
+        "hyperframes-video"
+      ],
+      "required": false
+    }
+  },
+  "electronBundle": [
+    "core",
+    "office",
+    "channels"
+  ],
+  "electronOptional": [
+    "dev",
+    "data",
+    "productivity"
+  ]
+}

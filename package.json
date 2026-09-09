@@ -1,0 +1,107 @@
+{
+    "name": "crabpaw",
+    "version": "2.2.0",
+    "description": "CrabPaw AI Agent Platform — 8-dimension Harness framework with multi-agent orchestration, tool self-healing, and domain skills",
+    "main": "src/cli/index.js",
+    "author": "CrabPaw Team",
+    "license": "MIT",
+    "private": true,
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "scripts": {
+        "gen:plugin-catalog": "node scripts/gen-plugin-catalog.js",
+        "plugin:verify": "node scripts/verify-plugins.js",
+        "layer:check": "node scripts/check-layer-contract.js",
+        "layer:baseline": "node scripts/check-layer-contract.js --update",
+        "harness:dump": "node src/cli/server.js --dump-harness",
+        "experts:org": "node scripts/build-expert-org.js",
+        "facts:write": "node scripts/harness-facts.js --write",
+        "facts:check": "node scripts/harness-facts.js --check",
+        "postinstall": "node scripts/postinstall-check.js",
+        "start": "node scripts/clean-start.js",
+        "dev": "node scripts/clean-start.js --watch",
+        "build:gui": "cd gui && npm run build:vite",
+        "build:electron": "cd gui && npm run build",
+        "build:portable": "powershell -ExecutionPolicy Bypass -File build-portable.ps1",
+        "build:release": "npm run build:electron && npm run rebuild:electron",
+        "rebuild:electron": "cd gui && npm run rebuild",
+        "download:deps": "node scripts/download-portable-deps.js",
+        "build:portable-full": "powershell -ExecutionPolicy Bypass -File build-portable.ps1",
+        "clean": "rm -rf dist dist-electron release node_modules/.cache",
+        "lint": "eslint src/ --ext .js",
+        "test": "jest",
+        "eval": "node evals/index.js",
+        "eval:regression": "node evals/regression-check.js",
+        "eval:save-baseline": "node evals/regression-check.js --save",
+        "profile": "node src/cli/index.js --profile start",
+        "dev:all": "node scripts/dev-all.js",
+        "lint:fix": "eslint src/ --ext .js --fix",
+        "typecheck": "tsc",
+        "eval:watch": "node --watch evals/index.js",
+        "changelog": "git log --oneline --no-decorate $(git describe --tags --abbrev=0 2>$null || echo HEAD~20)..HEAD > CHANGELOG.md",
+        "precommit": "node scripts/precommit-check.js",
+        "prepare": "husky"
+    },
+    "keywords": [
+        "ai",
+        "agent",
+        "lark",
+        "feishu",
+        "chatbot",
+        "mcp",
+        "automation",
+        "business"
+    ],
+    "dependencies": {
+        "@larksuite/cli": "^1.0.56",
+        "@wecom/aibot-node-sdk": "^1.0.7",
+        "adm-zip": "0.6.0",
+        "better-sqlite3": "^12.10.0",
+        "cloakbrowser": "0.5.10",
+        "cron-parser": "^5.5.0",
+        "docx": "9.7.1",
+        "exceljs": "^4.4.0",
+        "fontkit": "1.8.1",
+        "formidable": "^3.5.4",
+        "headroom-ai": "^0.22.4",
+        "js-yaml": "^4.2.0",
+        "marked": "^18.0.5",
+        "mysql2": "3.23.4",
+        "pdf-lib": "1.17.1",
+        "pdf-parse": "^2.4.5",
+        "pg": "8.23.0",
+        "playwright-core": "^1.57.0",
+        "pptxgenjs": "^4.0.1",
+        "sharp": "^0.35.2",
+        "sql.js": "^1.10.3",
+        "uuid": "^11.1.1",
+        "ws": "^8.20.1",
+        "yaml": "^2.8.3"
+    },
+    "optionalDependencies": {
+        "sqlite3": "^6.0.1"
+    },
+    "devDependencies": {
+        "@babel/preset-typescript": "7.29.7",
+        "@types/jest": "^30.0.0",
+        "eslint": "^8.57.0",
+        "husky": "9.1.7",
+        "jest": "29.7.0",
+        "typescript": "^5.4.5"
+    },
+    "overrides": {
+        "brace-expansion": "^5.0.9",
+        "image-size": "^2.0.2"
+    },
+    "jest": {
+        "testMatch": [
+            "<rootDir>/test/**/*.test.js",
+            "<rootDir>/src/**/*.test.js"
+        ],
+        "testPathIgnorePatterns": [
+            "/node_modules/",
+            "<rootDir>/tests/e2e/"
+        ]
+    }
+}

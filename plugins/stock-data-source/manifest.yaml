@@ -1,0 +1,16 @@
+name: stock-data-source
+version: "1.0.0"
+kind: plugin
+description: "股票行情/资讯数据源插件——数据源层插件托管示范: 启停本插件对股票取数真实生效"
+author: "CrabPaw Core"
+license: MIT
+lifecycle:
+  start: onStart
+  stop: onStop
+platforms: [windows, linux, macos]
+# 2026-08-26 数据源托管贡献点: 插件 enable 时注册/disable 时反注册
+contributes:
+  dataSources:
+    - name: stock
+      description: "股票行情/资讯(AKShare 多源+降级链)"
+      handler: datasource.js

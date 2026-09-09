@@ -1,0 +1,236 @@
+/* task-panel — 全息 HUD 任务卡（2026-08-03: 玻璃拟态 + 扫描线 + 状态灯 + 技能图标） */
+
+.tp-card {
+  position: relative;
+  padding: 14px 16px;
+  border-radius: 12px;
+  min-width: 260px;
+  max-width: 340px;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(0deg, rgba(160, 220, 255, 0.015) 0px, rgba(160, 220, 255, 0.015) 1px, transparent 1px, transparent 4px),
+    linear-gradient(135deg, rgba(26, 30, 48, 0.86), rgba(14, 16, 28, 0.82));
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  box-shadow:
+    0 0 24px rgba(56, 189, 248, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+/* 2026-08-04: 单行进度条模式（长任务）——图标+标题+进度+取消 一行排布 */
+.tp-card--compact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 260px;
+  max-width: 340px;
+  padding: 10px 14px;
+}
+.tp-card--compact .tp-title { flex: 1; min-width: 0; }
+.tp-progress--compact {
+  flex: 1;
+  margin-top: 0;
+  min-width: 60px;
+}
+
+/* 全息扫描线（顶部细光带滑动） */
+.tp-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.8), transparent);
+  animation: tpScan 3.2s linear infinite;
+  pointer-events: none;
+}
+@keyframes tpScan {
+  0% { transform: translateY(0); opacity: 0.2; }
+  15% { opacity: 1; }
+  100% { transform: translateY(96px); opacity: 0; }
+}
+
+.tp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  position: relative;
+  z-index: 1;
+}
+.tp-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(233, 243, 255, 0.95);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 状态徽章 */
+.tp-badge {
+  font-size: 14px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  position: relative;
+}
+.tp-badge::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 10px currentColor;
+  opacity: 0.35;
+}
+/* 状态灯（呼吸脉冲） */
+.tp-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.tp-dot--running { background: #f97316; box-shadow: 0 0 8px #f97316; animation: tpPulse 1.4s ease-in-out infinite; }
+.tp-dot--success { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
+.tp-dot--error   { background: #f87171; box-shadow: 0 0 8px #f87171; }
+.tp-dot--cancelled { background: #94a3b8; box-shadow: 0 0 8px #94a3b8; }
+@keyframes tpPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
+}
+
+/* 阶段步骤 */
+.tp-steps { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; position: relative; z-index: 1; }
+.tp-step { display: flex; align-items: center; gap: 6px; font-size: 14px; color: rgba(200, 216, 235, 0.8); }
+.tp-step-mark { width: 16px; text-align: center; }
+.tp-step--done .tp-step-mark { color: #4ade80; }
+.tp-step--running .tp-step-mark { color: #f97316; animation: tpPulse 1.4s ease-in-out infinite; }
+.tp-step--error .tp-step-mark { color: #f87171; }
+.tp-step--pending { color: rgba(148, 163, 184, 0.55); }
+
+/* 进度条（渐变流光） */
+.tp-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-top: 10px;
+  position: relative;
+  z-index: 1;
+}
+.tp-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #f97316, #fbbf24, #38bdf8);
+  background-size: 200% 100%;
+  animation: tpFlow 2.2s linear infinite;
+  transition: width 0.5s ease;
+}
+@keyframes tpFlow {
+  0% { background-position: 0% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.tp-action {
+  font-size: 14px;
+  color: rgba(170, 186, 205, 0.9);
+  margin-top: 8px;
+  line-height: 1.4;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.tp-action-caret { color: #f97316; }
+
+/* 工具链 */
+.tp-tools-toggle {
+  font-size: 14px;
+  color: rgba(148, 163, 184, 0.75);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 0;
+  margin-top: 4px;
+  position: relative;
+  z-index: 1;
+}
+.tp-tools-toggle:hover { color: #38bdf8; }
+.tp-tools { margin-top: 2px; display: flex; flex-direction: column; gap: 3px; position: relative; z-index: 1; }
+.tp-tool {
+  font-size: 14px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+.tp-tool--error { border-color: rgba(244, 67, 54, 0.35); }
+.tp-tool-name {
+  min-width: 72px;
+  color: #59a8ff;
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+.tp-tool--skill .tp-tool-name { color: #a78bfa; } /* 技能调用紫色标识 */
+.tp-tool-summary { flex: 1; color: rgba(170, 186, 205, 0.8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-tool-status { color: #4ade80; }
+.tp-tool-status--err { color: #f87171; }
+
+.tp-cancel {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+  position: relative;
+  z-index: 1;
+}
+.tp-cancel-btn {
+  font-size: 14px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(244, 67, 54, 0.4);
+  color: #f87171;
+  background: rgba(244, 67, 54, 0.08);
+  cursor: pointer;
+}
+.tp-cancel-btn:hover { background: rgba(244, 67, 54, 0.18); }
+
+/* 2026-08-13: 失败重试按钮(P1-5, ag-ui 工具失败显式化)——compact 小圆钮 + 全卡描边钮 */
+.tp-retry-btn {
+  font-size: 14px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(74, 222, 128, 0.45);
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.08);
+  cursor: pointer;
+  margin-right: 4px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.tp-retry-btn:hover { background: rgba(74, 222, 128, 0.18); border-color: rgba(74, 222, 128, 0.7); }
+.tp-retry-btn--full { width: 100%; padding: 5px 10px; }
+
+/* 2026-08-13: 工具链 running 态——脉动圆点替代 ✓ */
+.tp-tool-status--running {
+  color: #f97316;
+  animation: tpPulse 1.4s ease-in-out infinite;
+  display: inline-block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tp-card::before, .tp-dot--running, .tp-progress-fill, .tp-tool-status--running { animation: none !important; }
+}
+
+/* 2026-08-13 P2-2: run 终态徽章入场 */
+@keyframes tp-badge-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}

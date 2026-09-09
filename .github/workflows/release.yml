@@ -1,0 +1,51 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 2026-09-08 对齐便携版设计文档(docs/superpowers/specs/2026-08-25-crabpaw-portable-usb-design.md):
+      # 构建机 Node 必须 24.x —— root npm ci 装出的 better-sqlite3/sharp prebuild 要与
+      # 捆绑 node.exe v24 ABI 匹配(build-portable.ps1 Check-Prereq 强制校验)。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install root dependencies
+        run: npm ci
+      # B1: 缓存便携依赖(CloakBrowser ~400MB + Python + node.exe),package 未变时重复构建跳过下载。
+      - name: Cache portable dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/cloakbrowser
+            portable
+            gui/resources
+          key: ${{ hashFiles('package.json', 'package-lock.json') }}
+      - name: Download portable dependencies (CloakBrowser + Python + node.exe)
+        run: npm run download:deps
+      - name: Install gui dependencies
+        run: cd gui && npm ci
+      # 统一走 build-portable.ps1 定稿管线: sherpa-only rebuild → tsc+vite → electron-builder
+      # dir 目标 → 洁净度门禁 → zip。此前的两条路都是坑(设计文档 §1 已实锤):
+      #   1) portable SFX 单文件目标——每次启动清 %TEMP% 解压目录, CrabPaw-Data 随之被删;
+      #   2) 对 better-sqlite3/sharp 做 electron rebuild——它们跑在捆绑 node.exe 下, ABI 冲突。
+      - name: Build portable zip (dir target + clean gate)
+        shell: pwsh
+        run: ./build-portable.ps1
+      - name: Upload portable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: CrabPaw-Portable
+          path: CrabPaw-Release/*.zip
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: CrabPaw-Release/*.zip
+          generate_release_notes: true
