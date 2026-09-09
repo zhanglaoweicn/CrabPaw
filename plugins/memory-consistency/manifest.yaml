@@ -1,0 +1,10 @@
+name: memory-consistency
+version: "1.0.0"
+kind: plugin
+description: "记忆一致性维护 — 定期检查和修复记忆系统中的冲突和不一致"
+author: "CrabPaw Core"
+license: MIT
+lifecycle:
+  start: onStart
+  stop: onStop
+platforms: [windows, linux, macos]

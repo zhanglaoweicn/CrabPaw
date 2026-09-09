@@ -1,0 +1,394 @@
+/* MeetingPanel — 会议记录面板样式（2026-08-19 重做）
+ * 视觉口径对齐视频卡片（MediaStage）：深色底 rgba(20,20,28,0.95) +
+ * backdrop blur 24px + rgba(255,255,255,0.1) 分隔线 + 16px 水平边距。
+ * 三段式结构：标题栏 / 内容区(flex-1) / 底部操作行。 */
+
+/* 2026-08-19: 与右侧栏(对话窗口)同高同顶——header 高约 76px,
+ * 右侧栏 = 76px(header 底) 起 → 底部 16px;面板不 fitContent,
+ * 左右两块并排等高(组合布局下对话窗口同样从 header 底起)。 */
+.side-sheet--meeting {
+  top: 76px;
+  bottom: 16px;
+}
+
+.meeting-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: rgba(20, 20, 28, 0.95);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+/* ── 标题栏（视频卡片同构：px-4 py-3 + border-b white/10） ── */
+.meeting-header {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+.meeting-title-icon { font-size: 15px; }
+.meeting-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #eef2f8;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+/* 录制红点（旧 MeetingCard pulse 动画同款） */
+.meeting-dot--rec {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: meeting-pulse 1.2s ease-in-out infinite;
+}
+@keyframes meeting-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+/* 关闭按钮（SideSheet 契约：data-close-btn 供打开聚焦/焦点圈闭） */
+.meeting-close-btn {
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(238, 242, 248, 0.75);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.meeting-close-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #eef2f8;
+}
+.meeting-close-btn:focus-visible {
+  outline: 2px solid rgba(89, 168, 255, 0.6);
+  outline-offset: 1px;
+}
+
+/* ── 错误条 ── */
+.meeting-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.1);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+}
+.meeting-error-retry {
+  flex-shrink: 0;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: transparent;
+  color: #f87171;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.meeting-error-retry:hover { background: rgba(248, 113, 113, 0.15); }
+
+/* ── 内容区（flex-1 滚动） ── */
+.meeting-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* ── 空态引导 ── */
+.meeting-empty {
+  padding: 40px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.meeting-empty-icon { font-size: 28px; }
+.meeting-empty-text {
+  font-size: 12px;
+  color: rgba(238, 242, 248, 0.55);
+  text-align: center;
+  line-height: 1.7;
+}
+.meeting-empty-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+/* ── 通用按钮 ── */
+.meeting-btn {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: #eef2f8;
+  font-size: 13px;
+  padding: 7px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.meeting-btn:hover { background: rgba(255, 255, 255, 0.12); }
+.meeting-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.meeting-btn--primary {
+  background: var(--accent-primary, rgba(89, 168, 255, 0.16));
+  border-color: rgba(89, 168, 255, 0.35);
+}
+.meeting-btn--primary:hover { background: rgba(89, 168, 255, 0.26); }
+.meeting-btn--stop {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+.meeting-btn--stop:hover { background: rgba(239, 68, 68, 0.24); }
+
+/* ── 转写区 ──
+ * 2026-08-19: 移除 max-height 420px——面板全高(与右侧栏等高)后由
+ * .meeting-body(flex-1 min-h-0)统一滚动, 转写区不再自我截断留白 */
+.meeting-transcript {
+  overflow-y: auto;
+  padding: 14px 16px;
+  scrollbar-width: thin;
+}
+.meeting-transcript-empty {
+  padding: 28px 0;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(238, 242, 248, 0.4);
+}
+.meeting-seg {
+  font-size: 14px;
+  line-height: 1.75;
+  color: #eef2f8;
+  padding: 5px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+}
+.meeting-seg:last-child { border-bottom: none; }
+.meeting-seg--partial { opacity: 0.6; }
+.meeting-seg--done { display: flex; gap: 10px; }
+.meeting-seg-time {
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: rgba(238, 242, 248, 0.4);
+  padding-top: 3px;
+}
+
+/* ── 总结中 ── */
+.meeting-summarizing {
+  padding: 48px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.meeting-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(255, 255, 255, 0.12);
+  border-top-color: var(--accent-primary, #59a8ff);
+  border-radius: 50%;
+  animation: meeting-spin 0.8s linear infinite;
+}
+@keyframes meeting-spin { to { transform: rotate(360deg); } }
+.meeting-summarizing-text {
+  font-size: 13px;
+  color: rgba(238, 242, 248, 0.7);
+}
+
+/* ── 详情视图 ── */
+.meeting-detail { padding: 16px; }
+.meeting-block { margin-bottom: 16px; }
+.meeting-block-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #eef2f8;
+  margin-bottom: 8px;
+}
+.meeting-block-meta {
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(238, 242, 248, 0.4);
+}
+.meeting-block-body {
+  font-size: 14px;
+  line-height: 1.8;
+  color: rgba(238, 242, 248, 0.9);
+}
+.meeting-points {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.9;
+  color: rgba(238, 242, 248, 0.9);
+}
+.meeting-points li::marker { color: rgba(89, 168, 255, 0.7); }
+
+/* ── 历史列表 ── */
+.meeting-list { padding: 8px 16px 16px; }
+.meeting-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.meeting-list-item:hover { background: rgba(255, 255, 255, 0.05); }
+.meeting-list-main { flex: 1; min-width: 0; }
+.meeting-list-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #eef2f8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.meeting-list-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.meeting-list-badge--warn { color: #fcd34d; background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.3); }
+/* 2026-09-01(R4): interrupted 僵尸态清理后的中性徽章 */
+.meeting-list-badge--muted {
+  color: rgba(238, 242, 248, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+}
+/* ── P2a 书签 ── */
+.meeting-seg-bookmark {
+  margin-right: 6px;
+  font-size: 12px;
+}
+.meeting-bookmarks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0 2px;
+}
+.meeting-bookmark-chip {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #eef2f8;
+  font-size: 12px;
+  padding: 3px 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.meeting-bookmark-chip:hover { background: rgba(255, 255, 255, 0.14); }
+/* 2026-09-01(R2): 空壳详情空态副文案 */
+.meeting-empty-sub {
+  font-size: 12px;
+  color: rgba(238, 242, 248, 0.45);
+  margin-top: 4px;
+}
+.meeting-list-meta {
+  font-size: 11px;
+  color: rgba(238, 242, 248, 0.45);
+  margin-top: 3px;
+}
+.meeting-list-delete {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(238, 242, 248, 0.35);
+  font-size: 12px;
+  cursor: pointer;
+}
+.meeting-list-delete:hover { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+
+/* ── 底部操作行（视频卡片同构：border-t white/10 + px-4 py-3） ── */
+.meeting-footer {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+.meeting-timer {
+  font-size: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: rgba(238, 242, 248, 0.75);
+  min-width: 52px;
+  text-align: center;
+}
+
+/* ── P2b 实时智能层两栏 ── */
+/* .meeting-body 是普通滚动块(非 flex)——两栏容器必须显式 height:100% 才能约束
+ * 子栏高度, 让转写/提取各自独立滚动(否则内容撑高, 右栏跟着 body 滚走) */
+.meeting-live {
+  display: flex;
+  height: 100%;
+}
+.meeting-live .meeting-transcript {
+  flex: 1;
+  min-width: 0;
+}
+.meeting-insights {
+  flex-shrink: 0;
+  width: 240px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 12px 14px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.meeting-insights-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(238, 242, 248, 0.6);
+  margin-bottom: 8px;
+}
+.meeting-insights-status {
+  font-size: 12px;
+  color: rgba(238, 242, 248, 0.4);
+  padding: 6px 0;
+}
+.meeting-insights-group { margin-bottom: 10px; }
+.meeting-insights-group-title {
+  font-size: 12px;
+  color: rgba(238, 242, 248, 0.7);
+  margin-bottom: 4px;
+}
+.meeting-insights-group ul {
+  margin: 0;
+  padding-left: 16px;
+  list-style: disc;
+}
+.meeting-insights-group li {
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(238, 242, 248, 0.85);
+}

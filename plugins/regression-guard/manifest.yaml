@@ -1,0 +1,10 @@
+name: regression-guard
+version: "1.0.0"
+kind: plugin
+description: "回归防护 — 自动运行回归测试，检测技能变化导致的退化"
+author: "CrabPaw Core"
+license: MIT
+lifecycle:
+  start: onStart
+  stop: onStop
+platforms: [windows, linux, macos]

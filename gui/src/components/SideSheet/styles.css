@@ -1,0 +1,158 @@
+/* SideSheet — 参考实现 hotspot-panel 交互模式复刻
+   对照参考实现（brain-ui 工程）styles.css 2731-2868 */
+
+.side-sheet {
+  position: fixed;
+  left: 16px;
+  top: 16px;
+  bottom: 16px;
+  /* 2026-08-16: 顶部 drag 区域遮挡修复——.voice-shell-header 是
+     -webkit-app-region: drag, frameless 窗口下 drag 区域由浏览器层
+     拦截鼠标事件: 面板 top:16 与 header(高约 76px)垂直重叠, 头部关闭
+     按钮行不标 no-drag 则收不到点击(应用顶部"挡住"关闭按钮)。
+     整卡 no-drag 挖洞放行; 面板自身拖动走 SideSheet 自有 pointer-capture,
+     不依赖窗口 drag 区。 */
+  -webkit-app-region: no-drag;
+  width: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-deep, #0a0e17) 94%, #000d1a);
+  border: 1px solid transparent;
+  opacity: 0;
+  pointer-events: none;
+  /* 关闭态移出 a11y/焦点树：Tab 不可达隐藏面板内容（常驻挂载保留） */
+  visibility: hidden;
+  display: flex;
+  flex-direction: column;
+  transition:
+    width 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.35s ease,
+    border-color 0.35s ease,
+    transform .3s ease,
+    visibility 0s linear 0.45s;
+}
+
+.side-sheet[data-open='true'] {
+  width: var(--sheet-width, min(56vw, 860px));
+  opacity: 1;
+  /* 2026-09-02: 配合关闭后 display:none(幽灵 GPU 层根治)——@starting-style 定义
+     从 display:none 出现时的过渡起点, 保证 0.45s 宽度滑入动画不丢 */
+  @starting-style {
+    width: 0;
+    opacity: 0;
+  }
+  pointer-events: auto;
+  border-color: var(--line-strong, rgba(120, 170, 255, 0.16));
+  visibility: visible;
+  transition:
+    width 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.35s ease,
+    border-color 0.35s ease,
+    transform .3s ease,
+    visibility 0s;
+}
+
+/* 2026-08-14: fitContent 浮动小卡模式——天气/音乐等轻量卡片。
+   高度随内容(底部不再贴边), 垂直顶部对齐; 关闭态高度收 0 配合过渡 */
+.side-sheet[data-fit-content='true'] {
+  bottom: auto;
+  max-height: calc(100vh - 32px);
+  height: auto;
+}
+.side-sheet[data-fit-content='true'][data-open='false'] {
+  height: 0;
+  min-height: 0;
+}
+
+/* 2026-08-15: 可拖动模式——拖拽中禁文本选中防抖动 */
+.side-sheet.is-dragging {
+  user-select: none;
+  -webkit-user-select: none;
+  transition: none;
+}
+
+/* ── 启动序列：子区块标 sheet-boot + 内联 --boot-delay 变量 → 错峰 glitch 闪入 ── */
+.side-sheet.is-booting .sheet-boot {
+  position: relative;
+  opacity: 0;
+  transform: translateY(8px);
+  animation: sheet-glitch-in 620ms cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
+  animation-delay: var(--boot-delay, 0ms);
+  will-change: transform, opacity, filter, clip-path;
+}
+
+/* 信号扫光（::after 覆盖层） */
+.side-sheet.is-booting .sheet-boot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(120, 210, 255, 0.22) 48%, transparent 100%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 5px);
+  mix-blend-mode: screen;
+  opacity: 0;
+  transform: translateX(-120%);
+  animation: sheet-signal-sweep 560ms ease-out forwards;
+  animation-delay: calc(var(--boot-delay, 0ms) + 80ms);
+}
+
+@keyframes sheet-glitch-in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) skewX(-0.8deg);
+    filter: brightness(1.9) contrast(1.35) saturate(0.6);
+    clip-path: inset(42% 0 44% 0);
+  }
+  14% {
+    opacity: 0.9;
+    transform: translateY(-1px) translateX(-3px);
+    filter: brightness(2.25) contrast(1.6) saturate(1.35);
+    clip-path: inset(0 0 72% 0);
+  }
+  22% {
+    opacity: 0.35;
+    transform: translateY(4px) translateX(3px);
+    clip-path: inset(66% 0 0 0);
+  }
+  34% {
+    opacity: 1;
+    transform: translateY(0) translateX(-1px);
+    filter: brightness(1.35) contrast(1.18) saturate(1.1);
+    clip-path: inset(0 0 0 0);
+  }
+  46% {
+    opacity: 0.72;
+    transform: translateY(1px);
+    filter: brightness(1.8) contrast(1.35);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes sheet-signal-sweep {
+  0% { opacity: 0; transform: translateX(-120%); }
+  18% { opacity: 0.75; }
+  100% { opacity: 0; transform: translateX(120%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .side-sheet.is-booting .sheet-boot {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+  .side-sheet.is-booting .sheet-boot::after {
+    display: none;
+  }
+  .side-sheet {
+    transition: width 0.2s ease, opacity 0.2s ease, border-color 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .side-sheet[data-open='true'] {
+    transition: width 0.2s ease, opacity 0.2s ease, border-color 0.2s ease, visibility 0s;
+  }
+}

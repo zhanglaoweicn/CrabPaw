@@ -1,0 +1,65 @@
+/* FocusRibbon — agent 注意带(B3 2026-09-05)
+   一行细带, 贴对话卡顶栏; 配色对齐 orb 四态语义(绿听/橙思/蓝说),
+   acting=全息青 accent, waiting=琥珀行动色。idle 最暗融入背景。 */
+
+.focus-ribbon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary, #a1a1aa);
+  user-select: none;
+  white-space: nowrap;
+  transition: color 0.3s ease, opacity 0.3s ease;
+}
+
+.focus-ribbon-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+/* 进行中状态: 点脉冲呼吸(acting/waiting/thinking) */
+.focus-ribbon--acting .focus-ribbon-dot,
+.focus-ribbon--waiting .focus-ribbon-dot,
+.focus-ribbon--thinking .focus-ribbon-dot {
+  animation: focus-ribbon-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes focus-ribbon-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.72); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focus-ribbon--acting .focus-ribbon-dot,
+  .focus-ribbon--waiting .focus-ribbon-dot,
+  .focus-ribbon--thinking .focus-ribbon-dot {
+    animation: none;
+  }
+}
+
+/* ── 状态配色(对齐 orb 语义) ── */
+.focus-ribbon--idle {
+  color: rgba(113, 113, 122, 0.55); /* --text-muted 再降档, 融入背景 */
+}
+.focus-ribbon--listening {
+  color: #4ade80;   /* 绿 = orb listening */
+}
+.focus-ribbon--thinking {
+  color: #fb923c;   /* 橙 = orb thinking */
+}
+.focus-ribbon--speaking {
+  color: #60a5fa;   /* 蓝 = orb speaking */
+}
+.focus-ribbon--acting {
+  color: #22d3ee;   /* 全息青 accent(2026-08-14 DingDong 对齐) */
+}
+.focus-ribbon--waiting {
+  color: #fbbf24;   /* 琥珀 = 需要用户行动 */
+  font-weight: 600;
+}

@@ -1,0 +1,112 @@
+/* CommandPalette — Ctrl+K/Cmd+K 全局命令面板
+   玻璃态风格：半透明遮罩 + 居中卡片，与项目玻璃态体系一致 */
+
+.command-palette-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-topmost);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 18vh;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: cpo-fade-in 0.15s ease-out;
+}
+
+@keyframes cpo-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.command-palette {
+  width: 520px;
+  max-width: 92vw;
+  max-height: 56vh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 18, 30, 0.92);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 24px rgba(249, 115, 22, 0.06);
+  overflow: hidden;
+  animation: cpo-slide-in 0.18s ease-out;
+}
+
+@keyframes cpo-slide-in {
+  from { opacity: 0; transform: translateY(-12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.command-palette input {
+  width: 100%;
+  padding: 14px 18px;
+  font-size: 15px;
+  color: var(--text-primary, #f3f5fb);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  outline: none;
+  font-family: inherit;
+}
+
+.command-palette input::placeholder {
+  color: rgba(243, 245, 251, 0.35);
+}
+
+.command-palette-list {
+  overflow-y: auto;
+  padding: 6px;
+  max-height: 360px;
+}
+
+.command-palette-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.command-palette-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+
+.command-palette-empty {
+  padding: 28px 14px;
+  font-size: 13px;
+  text-align: center;
+  color: rgba(243, 245, 251, 0.45);
+  user-select: none;
+}
+
+.command-palette-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text-primary, #f3f5fb);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.12s;
+}
+
+.command-palette-item:hover,
+.command-palette-item:focus-visible {
+  background: rgba(249, 115, 22, 0.12);
+  outline: none;
+}
+
+.command-palette-item em {
+  font-style: normal;
+  font-size: 11px;
+  color: rgba(243, 245, 251, 0.4);
+  flex-shrink: 0;
+  margin-left: 12px;
+}

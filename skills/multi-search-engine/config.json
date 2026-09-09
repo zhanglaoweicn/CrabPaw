@@ -1,0 +1,8 @@
+{
+  "name": "multi-search-engine",
+  "engines": [
+    {"name": "必应", "url": "https://cn.bing.com/search?q={keyword}", "region": "cn"},
+    {"name": "360搜索", "url": "https://www.so.com/s?q={keyword}", "region": "cn"}
+  ],
+  "changelog": "2026-07-03: 移除被 GFW/反爬的引擎(baidu/sogou/sm.cn/toutiao)"
+}

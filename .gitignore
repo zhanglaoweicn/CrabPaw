@@ -1,0 +1,188 @@
+# 敏感信息 - 请勿提交到版本控制！
+.env
+.env.local
+.env.production
+
+# Claude Code 临时工作副本
+.claude/worktrees/
+
+# API 密钥和凭证
+.api_keys.json
+.keystore
+*.keystore
+.api_token
+.api_port
+
+# 评测运行时产物
+boss_profile_eval_*.json
+
+# 依赖
+node_modules/
+package-lock.json
+!gui/package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# 构建输出
+dist/
+dist-electron/
+release/
+/build/
+*.exe
+*.dll
+*.pak
+app.asar*
+
+# 日志和调试
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+crabpaw.log
+
+# 临时文件
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+*.patch
+*.zip
+*.docx
+*.pptx
+openharness-ref/
+tmp/
+tmp_*
+temp_*
+temp_diag.*
+fix_*.py
+rewrite_bash_tools.py
+.DS_Store
+Thumbs.db
+desktop.ini
+__pycache__/
+portable/
+
+# 编辑器和 IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.code-workspace
+
+# 测试覆盖率
+coverage/
+.nyc_output/
+
+# Eval 快照：latest.json 是 eval 自动生成的产物，不应手工维护或提交
+# 基线（baseline-*.json）仍由人工评审后提交，作为回归对比参照
+evals/snapshots/latest.json
+
+# 数据目录（包含用户数据）
+data/.crabpaw/
+data/skills/
+data/workspace/
+data/projects/
+data/*.md
+CrabPaw-Data/
+gui/data/.crabpaw/
+# 2026-08-13 最终审查: e2e 运行临时用户数据(20MB,防 git add -A 误提交)
+gui/.tmp-userdata/
+
+# 临时/生成的文件（防止重新出现）
+verify-*.js
+!scripts/verify-plugins.js
+!scripts/verify-portable-clean.js
+!src/test/verify-portable-clean.test.js
+lint-*.txt
+awakening-output*.txt
+concept-time-output*.txt
+self-test-output.txt
+startup*.log
+verify-self.log
+pattern-learner.json
+_check_indent.py
+opc-poster*.html
+
+# 备份文件
+*.backup.*
+*.bak
+
+# OS 文件
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 临时调试/修复脚本（未跟踪）
+/_[a-z]*.js
+_fix_*.js
+_fix*.js
+fix_*.py
+
+# 生成的 AI 报告
+AI*.html
+AI*.md
+
+# 保留示例配置
+!.env.example
+!data/.crabpaw/config.json.example
+
+# 便携版相关
+portable/libs/
+CrabPaw-Release/
+
+# Electron 相关
+out/
+resources/app.asar.unpacked
+
+# 确保 .npmrc 不被忽略（不含敏感信息）
+!.npmrc
+voice_session_eval*.json
+/data/cloakbrowser/
+.claude/settings.local.json
+
+# 开源发布排除（2026-08-24）- 内部笔记/业务统计/竞品分析不进公开仓库
+.claude/
+/memory/
+data/expert-stats.json
+docs/superpowers/
+docs/audit/
+docs/retrospective/
+docs/final-harness-gap-analysis-2026-06-29.md
+docs/harness-completeness-audit-2026-06-29.md
+docs/intelligence-audit-2026-06-29.md
+docs/memory-health-check-2026-06-29.md
+docs/livekit-voice-analysis-2026-08-04.md
+docs/SCENE-PROTOCOL-v1.md
+docs/UPGRADE_ROADMAP.md
+/archive/
+OPTIMIZATION_PLAN.md
+UPGRADE_PLAN.md
+voice_session_eval*.json
+
+
+# 2026-09-04 存盘清理: 诊断截图/构建缓存/临时脚本不入库
+/gui/layout-*.png
+/gui/stock-diag.png
+/gui/typhoon-diag*.png
+gui/tsconfig.node.tsbuildinfo
+scripts/tmp-*.cjs
+.zcode/
+
+# 2026-09-08 全内置发行: 便携运行时四件套(经 npm run download:deps 下载, 不入库)
+data/playwright-browsers/
+gui/resources/npm/
+gui/resources/npm.cmd
+gui/resources/npx.cmd
+
+# 2026-09-09 开源发布: lockfile 入库(release CI npm ci 依赖)
+!package-lock.json
+
+# eval/build 运行时临时文件(2026-09-10)
+data/tmp-eval/
+data/tmp_pip/
+data/tmp_*.json
+data/expert-stats.json
+debug.log

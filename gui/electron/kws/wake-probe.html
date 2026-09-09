@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Wake Probe</title>
+</head>
+<body>
+  <script>
+    // 隐藏采集窗口: AudioWorklet 采集 16kHz 单声道 Float32 PCM → IPC 上传
+    let audioContext = null
+    let processor = null
+
+    // 2026-08-03: 选择真实麦克风——排除'显示器音频'等无声虚拟设备
+    // （默认输入设备被切到 Intel 显示器音频时采集全静音 → 唤醒永不命中）
+    async function pickMicDeviceId() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const mics = devices.filter(d => d.kind === 'audioinput')
+        // R3: 排除显示器/虚拟设备 + 通信设备(Communications)——通信默认设备常被系统
+        // 静音/压低音量,probe 选到它则采集全静音 RMS~0.001 → sherpa 永不命中。
+        const bad = /display|显示器|虚拟|virtual|communications|通信|默认通信设备/i
+        const good = mics.filter(m => m.deviceId !== 'default' && m.label && !bad.test(m.label))
+        // 优先普通麦克风(非 Communications);若全被排除,退而求其次选非 default
+        const preferred = good.filter(m => !/communications|通信/i.test(m.label))
+        if (preferred.length > 0) return preferred[0].deviceId
+        if (good.length > 0) return good[0].deviceId
+        const anyNonDefault = mics.filter(m => m.deviceId !== 'default')
+        if (anyNonDefault.length > 0) return anyNonDefault[0].deviceId
+      } catch (e) { console.error('[wake-probe] 设备枚举失败:', e) }
+      return undefined
+    }
+
+    async function startCapture() {
+      let stream = null
+      try {
+        captureStream = null
+        const micId = await pickMicDeviceId()
+        // 2026-08-03: KWS 要干净原始音频——AEC/降噪/AGC 全关
+        // （参考项目实测：这些处理会扭曲语音压低音量害识别，样本 100% 命中
+        // 正因为干净）。此前开 AEC 后用户说话 RMS 从 0.3+ 跌到 0.02-0.04 →
+        // sherpa 检测不到 → 唤醒/识别全失效。
+        const audioConstraints = { channelCount: 1, sampleRate: 16000, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: micId ? { ...audioConstraints, deviceId: { exact: micId } } : audioConstraints
+          })
+        } catch (exactErr) {
+          console.warn('[wake-probe] 指定设备失败, 回退默认:', exactErr && exactErr.name)
+          stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+        }
+        captureStream = stream // 供 mic-toggle 停流引用
+        audioContext = new AudioContext({ sampleRate: 16000 })
+        await audioContext.audioWorklet.addModule(URL.createObjectURL(new Blob([`
+          class PcmCaptureProcessor extends AudioWorkletProcessor {
+            process(inputs) {
+              const ch = inputs[0] && inputs[0][0]
+              if (ch) {
+                this.port.postMessage(ch.slice(0))
+              }
+              return true
+            }
+          }
+          registerProcessor('pcm-capture', PcmCaptureProcessor)
+        `], { type: 'application/javascript' })))
+        const source = audioContext.createMediaStreamSource(stream)
+        processor = new AudioWorkletNode(audioContext, 'pcm-capture')
+        processor.port.onmessage = (e) => {
+          const f32 = e.data
+          // R2: 去掉 probe 端固定 g=4——与主进程 boostPcmForKws(自适应 target 0.06)
+          // 叠加后正常说话即削波(RMS 1.0,方波损坏 sherpa 特征 → 0 召回)。
+          // 统一由主进程自适应增益处理:按实际 RMS 动态放大,弱麦放大、强麦不动,不削波。
+          const buf = f32.buffer.slice(f32.byteOffset, f32.byteOffset + f32.byteLength)
+          window.wakeProbe.sendPcm(buf)
+        }
+        source.connect(processor)
+        if (window.wakeProbe && typeof window.wakeProbe.reportStatus === 'function') {
+          // 2026-08-03: 上报采集设备详情（label/deviceId）——诊断'无声采集'用
+          try {
+            const t = stream.getAudioTracks()[0]
+            const s = t && t.getSettings ? t.getSettings() : {}
+            const devices = await navigator.mediaDevices.enumerateDevices()
+            const micList = devices.filter(d => d.kind === 'audioinput').map(d => ({ label: d.label || '(无label)', id: String(d.deviceId).slice(0, 8) + '...' }))
+            window.wakeProbe.reportStatus('capturing', JSON.stringify({ label: t ? t.label : '(无轨道)', deviceId: String(s.deviceId || '').slice(0, 8) + '...', mics: micList }))
+          } catch (innerErr) { console.error('[wake-probe] 状态上报失败:', innerErr) }
+        }
+      } catch (err) {
+        // 清理已获取的 MediaStream，防止泄漏
+        if (stream) {
+          try { stream.getTracks().forEach(t => t.stop()) } catch (cleanupErr) { console.error('[wake-probe] 流清理失败:', cleanupErr) }
+        }
+        console.error('[wake-probe] 采集启动失败:', err)
+        if (window.wakeProbe && typeof window.wakeProbe.reportStatus === 'function') {
+          try { window.wakeProbe.reportStatus('error', err && err.message ? err.message : String(err)) } catch (innerErr) { console.error('[wake-probe] 状态上报失败:', innerErr) }
+        }
+      }
+    }
+
+    // 2026-08-03: ASR 会话激活时暂停采集（释放麦克风给 ASR），会话结束恢复
+    let captureStream = null
+    if (window.wakeProbe && typeof window.wakeProbe.onMicToggle === 'function') {
+      window.wakeProbe.onMicToggle((enabled) => {
+        try {
+          if (enabled) {
+            if (!captureStream) startCapture().finally(() => {
+              // F7: 采集启动(异步)完成后回执
+              try { window.wakeProbe.micToggleAck() } catch (ackErr) { console.error('[wake-probe] ack 失败:', ackErr) }
+            })
+          } else {
+            if (captureStream) {
+              try { captureStream.getTracks().forEach(t => t.stop()) } catch (stopErr) { console.error('[wake-probe] 停流失败:', stopErr) }
+              captureStream = null
+            }
+            if (audioContext) { try { audioContext.close() } catch (ctxErr) { console.error('[wake-probe] 关闭 AudioContext 失败:', ctxErr) } audioContext = null }
+            // F7: 同步停流完成即回执——主进程据此放行渲染 getUserMedia
+            try { window.wakeProbe.micToggleAck() } catch (ackErr) { console.error('[wake-probe] ack 失败:', ackErr) }
+          }
+        } catch (toggleErr) { console.error('[wake-probe] mic-toggle 处理失败:', toggleErr) }
+      })
+    }
+
+    window.addEventListener('DOMContentLoaded', () => startCapture())
+  </script>
+</body>
+</html>

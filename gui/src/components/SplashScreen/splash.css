@@ -1,0 +1,383 @@
+/* ═══════════════════════════════════════════════════════════
+   CrabPaw SplashScreen — 科幻/赛博朋克风格启动动画
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── 全屏容器 ── */
+.splash-root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-topmost);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  background: var(--bg-primary, #09090b);
+  overflow: hidden;
+  transition: opacity 300ms ease-out, transform 300ms ease-out;
+}
+
+.splash-root--fade-out {
+  opacity: 0;
+  transform: scale(1.02);
+}
+
+/* ── 网格点阵背景 ── */
+.splash-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: splash-grid-drift 20s linear infinite;
+}
+
+/* ── 扫描线 ── */
+.splash-scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, var(--accent-primary, #3572ff) 30%, var(--accent-primary, #3572ff) 70%, transparent 100%);
+  opacity: 0.4;
+  animation: splash-scan-line 3s ease-in-out infinite;
+  box-shadow: 0 0 12px var(--accent-primary, #3572ff), 0 0 40px rgba(53,114,255,0.2);
+}
+
+/* ── 辐射光环 ── */
+/* 2026-08-04: 辐射光环已移除(圆圈动效)——聚焦螃蟹 LOGO */
+
+/* ── 品牌区域 ── */
+.splash-brand {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 1;
+  transition: all 600ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.splash-brand--shrink {
+  transform: scale(0.65) translateY(-40px);
+}
+
+/* ── 2026-08-04: 螃蟹 LOGO 强化动效(能量环 + 脉冲光晕 + 呼吸 + 微旋转) ── */
+.splash-logo-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 200px;
+  height: 200px;
+  margin-bottom: 12px;
+}
+/* 外能量环(扩散脉冲) */
+.splash-logo-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 140, 60, 0.45);
+  box-shadow: 0 0 24px rgba(255, 140, 60, 0.2), inset 0 0 24px rgba(255, 140, 60, 0.1);
+  animation: splash-logo-ring-pulse 2.4s ease-out infinite;
+}
+.splash-logo-ring--inner {
+  inset: 22px;
+  border-color: rgba(56, 189, 248, 0.35);
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.18), inset 0 0 18px rgba(56, 189, 248, 0.08);
+  animation-delay: 1.2s;
+}
+@keyframes splash-logo-ring-pulse {
+  0%   { transform: scale(0.85); opacity: 0; }
+  40%  { opacity: 0.9; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+/* 扫描高光(顶部细光带滑动) */
+.splash-logo-wrap::after {
+  content: '';
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 200, 120, 0.9), transparent);
+  animation: splash-logo-scan 2.2s linear infinite;
+  pointer-events: none;
+}
+@keyframes splash-logo-scan {
+  0%   { transform: translateY(0); opacity: 0; }
+  12%  { opacity: 1; }
+  100% { transform: translateY(200px); opacity: 0; }
+}
+.splash-emoji {
+  position: relative;
+  font-size: 84px;
+  line-height: 1;
+  filter: drop-shadow(0 0 26px rgba(255, 140, 60, 0.55)) drop-shadow(0 0 60px rgba(56, 189, 248, 0.3));
+  animation: splash-crab-breathe 3s ease-in-out infinite;
+  z-index: 1;
+}
+@keyframes splash-crab-breathe {
+  0%, 100% { transform: scale(1) rotate(-3deg); filter: drop-shadow(0 0 20px rgba(255, 140, 60, 0.4)) drop-shadow(0 0 50px rgba(56, 189, 248, 0.25)); }
+  50%      { transform: scale(1.08) rotate(3deg); filter: drop-shadow(0 0 34px rgba(255, 140, 60, 0.7)) drop-shadow(0 0 80px rgba(56, 189, 248, 0.4)); }
+}
+
+.splash-title {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.splash-title-char {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--text-primary, #fafafa);
+  opacity: 0;
+  animation: splash-char-reveal 0.4s ease-out forwards;
+  text-shadow: 0 0 20px rgba(53,114,255,0.3);
+}
+
+.splash-subtitle {
+  font-size: 12px;
+  color: var(--text-muted, #71717a);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 0;
+  animation: splash-char-reveal 0.4s ease-out 0.7s forwards;
+}
+
+/* ── 进度微条（品牌阶段底部） ── */
+.splash-progress-bar {
+  margin-top: 24px;
+  width: 160px;
+  height: 2px;
+  background: var(--border-primary, #27272a);
+  border-radius: 1px;
+  overflow: hidden;
+  opacity: 0;
+  animation: splash-char-reveal 0.4s ease-out 0.9s forwards;
+}
+
+.splash-progress-bar-fill {
+  height: 100%;
+  border-radius: 1px;
+  background: linear-gradient(90deg, var(--accent-primary, #3572ff), var(--color-success, #22c55e));
+  animation: splash-progress-fill 1.5s ease-out 1s forwards;
+}
+
+/* ── 加载列表 ── */
+.splash-loading-list {
+  margin-top: 40px;
+  width: 260px;
+  z-index: 1;
+  opacity: 0;
+  animation: splash-fade-in 400ms ease-out forwards;
+}
+
+.splash-loading-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--text-muted, #71717a);
+  transition: color 0.3s, opacity 0.3s, transform 0.3s;
+  opacity: 0;
+  animation: splash-step-appear 0.4s ease-out forwards;
+}
+
+.splash-loading-item--starting {
+  color: var(--text-primary, #fafafa);
+}
+
+.splash-loading-item--ready {
+  color: var(--color-success, #22c55e);
+}
+
+.splash-loading-item--error {
+  color: var(--color-error, #ef4444);
+}
+
+.splash-loading-item--skipped {
+  color: var(--text-muted, #71717a);
+  opacity: 0.5;
+}
+
+/* 图标区域 */
+.splash-step-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.splash-step-icon--pending {
+  color: var(--text-muted, #71717a);
+}
+
+.splash-step-icon--starting {
+  color: var(--accent-primary, #3572ff);
+  animation: splash-dot-glow 1s ease-in-out infinite;
+}
+
+.splash-step-icon--ready {
+  color: var(--color-success, #22c55e);
+  /* 2026-08-01: 打勾点亮增强——弹性弹出 + 绿色光晕，扫描完成项更醒目 */
+  animation: splash-check-bounce 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  text-shadow: 0 0 10px rgba(34, 197, 94, 0.55);
+}
+
+.splash-step-icon--skipped {
+  /* 未配置项：灰点 + 不打勾（用户要求） */
+  color: var(--text-muted, #71717a);
+}
+
+.splash-step-icon--error {
+  color: var(--color-error, #ef4444);
+  animation: splash-shake 0.3s ease-out;
+}
+
+/* 未配置（skipped）项：标签灰化 + 虚线贯穿，明确"未配置"语义 */
+.splash-loading-item--skipped .splash-step-label {
+  text-decoration: line-through dotted;
+  text-decoration-color: var(--text-muted, #71717a);
+  opacity: 0.7;
+}
+
+/* 全部完成：进度条点亮 + 列表整体淡出（进入主界面前） */
+.splash-loading-progress-fill--done {
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.5);
+}
+
+.splash-loading-list--done {
+  animation: splash-list-done 500ms ease-out forwards;
+}
+
+/* 标签文本 */
+.splash-step-label {
+  flex: 1;
+}
+
+/* 状态文本 */
+.splash-step-status {
+  font-size: 11px;
+  color: var(--text-muted, #71717a);
+}
+
+.splash-step-status--starting {
+  color: var(--accent-primary, #3572ff);
+}
+
+.splash-step-status--ready {
+  color: var(--color-success, #22c55e);
+}
+
+.splash-step-status--error {
+  color: var(--color-error, #ef4444);
+}
+
+/* ── 加载列表底部进度条 ── */
+.splash-loading-progress {
+  margin-top: 16px;
+  width: 100%;
+  height: 2px;
+  background: var(--border-primary, #27272a);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.splash-loading-progress-fill {
+  height: 100%;
+  border-radius: 1px;
+  background: linear-gradient(90deg, var(--accent-primary, #3572ff), var(--accent-primary, #3572ff));
+  transition: width 0.5s ease-out, background 0.5s ease-out;
+}
+
+.splash-loading-progress-fill--done {
+  background: linear-gradient(90deg, var(--color-success, #22c55e), var(--color-success, #22c55e));
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   @keyframes
+   ═══════════════════════════════════════════════════════════ */
+
+@keyframes splash-scan-line {
+  0%   { top: -5%; }
+  100% { top: 105%; }
+}
+
+@keyframes splash-grid-drift {
+  0%   { background-position: 0 0; }
+  100% { background-position: 40px 40px; }
+}
+
+@keyframes splash-char-reveal {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes splash-progress-fill {
+  0%   { width: 0%; }
+  100% { width: 100%; }
+}
+
+@keyframes splash-fade-in {
+  0%   { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes splash-dot-glow {
+  0%, 100% { opacity: 0.5; transform: scale(0.9); }
+  50%      { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes splash-check-bounce {
+  0%   { transform: scale(0); opacity: 0; }
+  60%  { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* 扫描完成：列表整体淡出 + 上移（配合 done 事件的 400ms 延迟进入主界面） */
+@keyframes splash-list-done {
+  0%   { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-8px); }
+}
+
+@keyframes splash-shake {
+  0%, 100% { transform: translateX(0); }
+  25%      { transform: translateX(-3px); }
+  75%      { transform: translateX(3px); }
+}
+
+@keyframes splash-step-appear {
+  0%   { opacity: 0; transform: translateX(-8px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
+/* ── prefers-reduced-motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .splash-grid,
+  .splash-scan-line,
+  .splash-emoji,
+  .splash-step-icon--starting {
+    animation: none !important;
+  }
+  .splash-title-char,
+  .splash-subtitle,
+  .splash-progress-bar,
+  .splash-loading-item {
+    opacity: 1 !important;
+    animation: none !important;
+  }
+  .splash-progress-bar-fill {
+    width: 100% !important;
+    animation: none !important;
+  }
+  .splash-loading-list {
+    opacity: 1 !important;
+    animation: none !important;
+  }
+}
+

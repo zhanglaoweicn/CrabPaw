@@ -1,0 +1,13 @@
+{
+  "name": "example-dashboard",
+  "label": "示例插件",
+  "description": "CrabPaw 仪表盘插件示例，演示 SDK 使用方法",
+  "icon": "Sparkles",
+  "version": "1.0.0",
+  "tab": {
+    "path": "/example",
+    "position": "after:skills"
+  },
+  "entry": "dist/index.js",
+  "api": "plugin-api.js"
+}

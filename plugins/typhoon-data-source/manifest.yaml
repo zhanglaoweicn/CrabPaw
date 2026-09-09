@@ -1,0 +1,15 @@
+name: typhoon-data-source
+version: "1.0.0"
+kind: plugin
+description: "台风路径/历史台风数据源插件——数据源层插件托管: 启停对台风取数真实生效"
+author: "CrabPaw Core"
+license: MIT
+lifecycle:
+  start: onStart
+  stop: onStop
+platforms: [windows, linux, macos]
+contributes:
+  dataSources:
+    - name: typhoon
+      description: "台风路径/历史台风(主源+备源)"
+      handler: datasource.js

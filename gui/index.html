@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="theme-dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CrabPaw</title>
+    <!-- 2026-08-22 黑屏修复轮: 触发 vite full-reload 重建渲染管线 -->
+    <script>
+      (function() {
+        var theme = localStorage.getItem('crabpaw_theme') || 'dark';
+        document.documentElement.className = 'theme-' + theme;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root">
+      <div id="splash-bootstrap" style="position:fixed;inset:0;background:#09090b;display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:9999;">
+        <div style="font-size:48px;margin-bottom:16px;">🦀</div>
+        <div style="color:#71717a;font-size:14px;font-family:Inter,system-ui,sans-serif;letter-spacing:0.1em;">CrabPaw</div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+<!-- HMR full-reload 14 -->

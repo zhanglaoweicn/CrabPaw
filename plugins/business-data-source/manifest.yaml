@@ -1,0 +1,15 @@
+name: business-data-source
+version: "1.0.0"
+kind: plugin
+description: "经营数据数据源插件——数据源层插件托管: 启停对经营取数真实生效"
+author: "CrabPaw Core"
+license: MIT
+lifecycle:
+  start: onStart
+  stop: onStop
+platforms: [windows, linux, macos]
+contributes:
+  dataSources:
+    - name: business
+      description: "经营数据(导入表 registry: 表清单/角色/行数/时间)"
+      handler: datasource.js

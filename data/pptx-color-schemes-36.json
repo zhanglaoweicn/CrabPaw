@@ -1,0 +1,726 @@
+{
+  "description": "36套PPTX配色方案",
+  "count": 36,
+  "schemes": {
+    "academic-paper": {
+      "primary": "1A3A7A",
+      "secondary": "0A0A0A",
+      "accent": "0A0A0A",
+      "text": "0A0A0A",
+      "bg": "FDFCF8",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F5F3EA",
+        "border": "E0E0E0",
+        "text3": "707070",
+        "good": "1A5A2A",
+        "bad": "8A1A1A",
+        "warn": "8A6A1A",
+        "isDark": false
+      },
+      "description": "学术论文",
+      "tags": []
+    },
+    "arctic-cool": {
+      "primary": "1E6FB0",
+      "secondary": "17B1B1",
+      "accent": "17B1B1",
+      "text": "0E1F33",
+      "bg": "F2F6FB",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "EDF3FA",
+        "border": "E0E0E0",
+        "text3": "6B819B",
+        "good": "1AAF84",
+        "bad": "C5485A",
+        "warn": "D19030",
+        "isDark": false
+      },
+      "description": "北极清凉",
+      "tags": []
+    },
+    "aurora": {
+      "primary": "5EF2C6",
+      "secondary": "7AA2FF",
+      "accent": "7AA2FF",
+      "text": "E8F0FF",
+      "bg": "06091C",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F2F2F4",
+        "border": "E0E0E0",
+        "text3": "6A7A9E",
+        "good": "5EF2C6",
+        "bad": "FF8AB0",
+        "warn": "FFD27A",
+        "isDark": false
+      },
+      "description": "极光",
+      "tags": []
+    },
+    "bauhaus": {
+      "primary": "E03C27",
+      "secondary": "F4C430",
+      "accent": "F4C430",
+      "text": "111111",
+      "bg": "F4EFE3",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F4EFE3",
+        "border": "111111",
+        "text3": "666666",
+        "good": "1B8C3C",
+        "bad": "E03C27",
+        "warn": "F4C430",
+        "isDark": false
+      },
+      "description": "包豪斯",
+      "tags": []
+    },
+    "blueprint": {
+      "primary": "FFFFFF",
+      "secondary": "AEE1FF",
+      "accent": "AEE1FF",
+      "text": "E8F3FF",
+      "bg": "0B3A6F",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F2F2F4",
+        "border": "E0E0E0",
+        "text3": "7DA8CF",
+        "good": "8EF0A6",
+        "bad": "FF8A96",
+        "warn": "FFD27A",
+        "isDark": false
+      },
+      "description": "蓝图",
+      "tags": []
+    },
+    "catppuccin-latte": {
+      "primary": "8839EF",
+      "secondary": "1E66F5",
+      "accent": "1E66F5",
+      "text": "4C4F69",
+      "bg": "EFF1F5",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "EEF0F4",
+        "border": "E0E0E0",
+        "text3": "9CA0B0",
+        "good": "40A02B",
+        "bad": "D20F39",
+        "warn": "DF8E1D",
+        "isDark": false
+      },
+      "description": "Catppuccin拿铁",
+      "tags": []
+    },
+    "catppuccin-mocha": {
+      "primary": "CBA6F7",
+      "secondary": "89B4FA",
+      "accent": "89B4FA",
+      "text": "CDD6F4",
+      "bg": "1E1E2E",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "313244",
+        "surface2": "45475A",
+        "border": "E0E0E0",
+        "text3": "7F849C",
+        "good": "A6E3A1",
+        "bad": "F38BA8",
+        "warn": "F9E2AF",
+        "isDark": false
+      },
+      "description": "Catppuccin摩卡",
+      "tags": []
+    },
+    "corporate-clean": {
+      "primary": "0A2540",
+      "secondary": "1D4ED8",
+      "accent": "1D4ED8",
+      "text": "0A2540",
+      "bg": "FFFFFF",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F0F3F7",
+        "border": "E0E0E0",
+        "text3": "8898AA",
+        "good": "0E9F6E",
+        "bad": "DC2626",
+        "warn": "D97706",
+        "isDark": false
+      },
+      "description": "商务简洁",
+      "tags": []
+    },
+    "cyberpunk-neon": {
+      "primary": "FF2BD6",
+      "secondary": "00F0FF",
+      "accent": "00F0FF",
+      "text": "F5F7FF",
+      "bg": "000000",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "0F0F1A",
+        "surface2": "14141F",
+        "border": "E0E0E0",
+        "text3": "6B6E8A",
+        "good": "39FF14",
+        "bad": "FF2BD6",
+        "warn": "F9F871",
+        "isDark": false
+      },
+      "description": "赛博霓虹",
+      "tags": []
+    },
+    "dracula": {
+      "primary": "BD93F9",
+      "secondary": "FF79C6",
+      "accent": "FF79C6",
+      "text": "F8F8F2",
+      "bg": "282A36",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "343746",
+        "surface2": "44475A",
+        "border": "E0E0E0",
+        "text3": "6272A4",
+        "good": "50FA7B",
+        "bad": "FF5555",
+        "warn": "F1FA8C",
+        "isDark": false
+      },
+      "description": "德古拉",
+      "tags": []
+    },
+    "editorial-serif": {
+      "primary": "8A2A1C",
+      "secondary": "C97A4A",
+      "accent": "C97A4A",
+      "text": "1B1410",
+      "bg": "FAF7F2",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F7F2E8",
+        "border": "E0E0E0",
+        "text3": "8A7868",
+        "good": "3F7D4F",
+        "bad": "8A2A1C",
+        "warn": "B07A1F",
+        "isDark": false
+      },
+      "description": "编辑杂志",
+      "tags": []
+    },
+    "engineering-whiteprint": {
+      "primary": "0A1E46",
+      "secondary": "1E5AC4",
+      "accent": "1E5AC4",
+      "text": "0A1E46",
+      "bg": "FFFFFF",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F4F7FB",
+        "border": "E0E0E0",
+        "text3": "8090A8",
+        "good": "1A6A3A",
+        "bad": "C42A10",
+        "warn": "C47A10",
+        "isDark": false
+      },
+      "description": "工程白图",
+      "tags": []
+    },
+    "glassmorphism": {
+      "primary": "7DD3FC",
+      "secondary": "C084FC",
+      "accent": "C084FC",
+      "text": "F2F4FF",
+      "bg": "0B1024",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F2F2F4",
+        "border": "E0E0E0",
+        "text3": "8287A8",
+        "good": "86EFAC",
+        "bad": "FCA5A5",
+        "warn": "FDE68A",
+        "isDark": false
+      },
+      "description": "玻璃态",
+      "tags": []
+    },
+    "gruvbox-dark": {
+      "primary": "FABD2F",
+      "secondary": "FE8019",
+      "accent": "FE8019",
+      "text": "EBDBB2",
+      "bg": "282828",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "3C3836",
+        "surface2": "504945",
+        "border": "E0E0E0",
+        "text3": "928374",
+        "good": "B8BB26",
+        "bad": "FB4934",
+        "warn": "FABD2F",
+        "isDark": false
+      },
+      "description": "Gruvbox暗色",
+      "tags": []
+    },
+    "japanese-minimal": {
+      "primary": "D93A2A",
+      "secondary": "1A1A18",
+      "accent": "1A1A18",
+      "text": "1A1A18",
+      "bg": "FAFAF5",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F5F3EA",
+        "border": "E0E0E0",
+        "text3": "9C958A",
+        "good": "4A6B3E",
+        "bad": "D93A2A",
+        "warn": "C9A961",
+        "isDark": false
+      },
+      "description": "和风极简",
+      "tags": []
+    },
+    "magazine-bold": {
+      "primary": "EA5A1A",
+      "secondary": "0A0A0A",
+      "accent": "0A0A0A",
+      "text": "0A0A0A",
+      "bg": "F5EFE2",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FBF6E8",
+        "surface2": "EDE5D0",
+        "border": "E0E0E0",
+        "text3": "6A6458",
+        "good": "2A6A2A",
+        "bad": "C42A10",
+        "warn": "EA5A1A",
+        "isDark": false
+      },
+      "description": "杂志粗体",
+      "tags": []
+    },
+    "memphis-pop": {
+      "primary": "FF3D8B",
+      "secondary": "37C2D7",
+      "accent": "37C2D7",
+      "text": "111111",
+      "bg": "FEF6E8",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "FFF1D1",
+        "border": "111111",
+        "text3": "666666",
+        "good": "6AC04C",
+        "bad": "FF3D8B",
+        "warn": "FFCC00",
+        "isDark": false
+      },
+      "description": "孟菲斯波普",
+      "tags": []
+    },
+    "midcentury": {
+      "primary": "D4902A",
+      "secondary": "2A7A7F",
+      "accent": "2A7A7F",
+      "text": "201810",
+      "bg": "F3EAD8",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "F9F2E0",
+        "surface2": "E8DCBE",
+        "border": "E0E0E0",
+        "text3": "9A8868",
+        "good": "5A7A3A",
+        "bad": "C7502A",
+        "warn": "D4902A",
+        "isDark": false
+      },
+      "description": "世纪中期",
+      "tags": []
+    },
+    "minimal-white": {
+      "primary": "111216",
+      "secondary": "3B3F4A",
+      "accent": "3B3F4A",
+      "text": "0C0D10",
+      "bg": "FFFFFF",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F5F5F6",
+        "border": "E0E0E0",
+        "text3": "9CA1B0",
+        "good": "1AAF6C",
+        "bad": "C13A3A",
+        "warn": "C98500",
+        "isDark": false
+      },
+      "description": "极简白",
+      "tags": []
+    },
+    "neo-brutalism": {
+      "primary": "FFD400",
+      "secondary": "FF5CA8",
+      "accent": "FF5CA8",
+      "text": "000000",
+      "bg": "FFFEF0",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "FFF38A",
+        "border": "000000",
+        "text3": "555555",
+        "good": "00B36B",
+        "bad": "FF3A30",
+        "warn": "FF9900",
+        "isDark": false
+      },
+      "description": "新粗野主义",
+      "tags": []
+    },
+    "news-broadcast": {
+      "primary": "E11D2D",
+      "secondary": "0A0A0A",
+      "accent": "0A0A0A",
+      "text": "0A0A0A",
+      "bg": "FFFFFF",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "ECECEC",
+        "border": "E0E0E0",
+        "text3": "7A7A7A",
+        "good": "0E7C3A",
+        "bad": "E11D2D",
+        "warn": "FFD100",
+        "isDark": false
+      },
+      "description": "新闻播报",
+      "tags": []
+    },
+    "nord": {
+      "primary": "88C0D0",
+      "secondary": "81A1C1",
+      "accent": "81A1C1",
+      "text": "ECEFF4",
+      "bg": "2E3440",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "3B4252",
+        "surface2": "434C5E",
+        "border": "E0E0E0",
+        "text3": "7B8394",
+        "good": "A3BE8C",
+        "bad": "BF616A",
+        "warn": "EBCB8B",
+        "isDark": false
+      },
+      "description": "Nord",
+      "tags": []
+    },
+    "pitch-deck-vc": {
+      "primary": "0070F3",
+      "secondary": "7928CA",
+      "accent": "7928CA",
+      "text": "0B0D12",
+      "bg": "FFFFFF",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F5F7FA",
+        "border": "E0E0E0",
+        "text3": "8B93A8",
+        "good": "0CCE6B",
+        "bad": "EE0000",
+        "warn": "F5A524",
+        "isDark": false
+      },
+      "description": "融资路演",
+      "tags": []
+    },
+    "rainbow-gradient": {
+      "primary": "FF4D8B",
+      "secondary": "7A5CFF",
+      "accent": "7A5CFF",
+      "text": "0C0D10",
+      "bg": "FFFFFF",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F4F4F8",
+        "border": "E0E0E0",
+        "text3": "9096A8",
+        "good": "1AAF6C",
+        "bad": "E0445A",
+        "warn": "F5A524",
+        "isDark": false
+      },
+      "description": "彩虹渐变",
+      "tags": []
+    },
+    "retro-tv": {
+      "primary": "E67E14",
+      "secondary": "C73A1F",
+      "accent": "C73A1F",
+      "text": "2A1A08",
+      "bg": "F5ECD7",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FBF5E2",
+        "surface2": "EFE3C2",
+        "border": "E0E0E0",
+        "text3": "A68656",
+        "good": "3E8940",
+        "bad": "C73A1F",
+        "warn": "E67E14",
+        "isDark": false
+      },
+      "description": "复古电视",
+      "tags": []
+    },
+    "rose-pine": {
+      "primary": "EBBCBA",
+      "secondary": "C4A7E7",
+      "accent": "C4A7E7",
+      "text": "E0DEF4",
+      "bg": "191724",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "26233A",
+        "surface2": "2A2740",
+        "border": "E0E0E0",
+        "text3": "6E6A86",
+        "good": "31748F",
+        "bad": "EB6F92",
+        "warn": "F6C177",
+        "isDark": false
+      },
+      "description": "玫瑰松木",
+      "tags": []
+    },
+    "sharp-mono": {
+      "primary": "000000",
+      "secondary": "4A4A4A",
+      "accent": "F5A524",
+      "text": "000000",
+      "bg": "FFFFFF",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "000000",
+        "border": "000000",
+        "text3": "4A4A4A",
+        "good": "008800",
+        "bad": "FF0000",
+        "warn": "FF9900",
+        "isDark": false
+      },
+      "description": "锋锐单色",
+      "tags": []
+    },
+    "soft-pastel": {
+      "primary": "F49BB8",
+      "secondary": "B5D5F0",
+      "accent": "B5D5F0",
+      "text": "3A1F33",
+      "bg": "FDF7FB",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "FDF0F5",
+        "border": "E0E0E0",
+        "text3": "A28A99",
+        "good": "9DD9A3",
+        "bad": "EF9A9A",
+        "warn": "F7D08A",
+        "isDark": false
+      },
+      "description": "柔和马卡龙",
+      "tags": []
+    },
+    "solarized-light": {
+      "primary": "268BD2",
+      "secondary": "2AA198",
+      "accent": "2AA198",
+      "text": "073642",
+      "bg": "FDF6E3",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F5EFD7",
+        "border": "E0E0E0",
+        "text3": "93A1A1",
+        "good": "859900",
+        "bad": "DC322F",
+        "warn": "B58900",
+        "isDark": false
+      },
+      "description": "Solarized亮色",
+      "tags": []
+    },
+    "sunset-warm": {
+      "primary": "E36A2D",
+      "secondary": "F2A341",
+      "accent": "F2A341",
+      "text": "2A160A",
+      "bg": "FFF7EF",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "FFF2E0",
+        "border": "E0E0E0",
+        "text3": "A28572",
+        "good": "5EA35A",
+        "bad": "D94860",
+        "warn": "F2A341",
+        "isDark": false
+      },
+      "description": "日落暖橙",
+      "tags": []
+    },
+    "swiss-grid": {
+      "primary": "D6001C",
+      "secondary": "111111",
+      "accent": "111111",
+      "text": "111111",
+      "bg": "FFFFFF",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F4F4F4",
+        "border": "111111",
+        "text3": "888888",
+        "good": "0F8A2F",
+        "bad": "D6001C",
+        "warn": "D38A00",
+        "isDark": false
+      },
+      "description": "瑞士网格",
+      "tags": []
+    },
+    "terminal-green": {
+      "primary": "00FF88",
+      "secondary": "67FFD0",
+      "accent": "67FFD0",
+      "text": "8CFF9A",
+      "bg": "030A04",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "0A1B10",
+        "surface2": "0D2614",
+        "border": "E0E0E0",
+        "text3": "2F8A4D",
+        "good": "00FF88",
+        "bad": "FF6464",
+        "warn": "FFE066",
+        "isDark": false
+      },
+      "description": "终端绿",
+      "tags": []
+    },
+    "tokyo-night": {
+      "primary": "7AA2F7",
+      "secondary": "BB9AF7",
+      "accent": "BB9AF7",
+      "text": "C0CAF5",
+      "bg": "1A1B26",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "24283B",
+        "surface2": "2F334D",
+        "border": "E0E0E0",
+        "text3": "565F89",
+        "good": "9ECE6A",
+        "bad": "F7768E",
+        "warn": "E0AF68",
+        "isDark": false
+      },
+      "description": "东京之夜",
+      "tags": []
+    },
+    "vaporwave": {
+      "primary": "FF6EC7",
+      "secondary": "00F5FF",
+      "accent": "00F5FF",
+      "text": "FDF0FF",
+      "bg": "1A0938",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F2F2F4",
+        "border": "E0E0E0",
+        "text3": "8A6BA8",
+        "good": "1AAF6C",
+        "bad": "E0445A",
+        "warn": "F5A524",
+        "isDark": false
+      },
+      "description": "蒸汽波",
+      "tags": []
+    },
+    "xiaohongshu-white": {
+      "primary": "FF2742",
+      "secondary": "FF7A90",
+      "accent": "FF7A90",
+      "text": "1A1210",
+      "bg": "FFFDFB",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "FFF1EA",
+        "border": "E0E0E0",
+        "text3": "A08D85",
+        "good": "3BA55C",
+        "bad": "FF2742",
+        "warn": "F5A524",
+        "isDark": false
+      },
+      "description": "小红书白",
+      "tags": []
+    },
+    "y2k-chrome": {
+      "primary": "8A5CFF",
+      "secondary": "3CCFD8",
+      "accent": "3CCFD8",
+      "text": "1A1F2E",
+      "bg": "DFE4EC",
+      "titleText": "FFFFFF",
+      "_meta": {
+        "surface": "FFFFFF",
+        "surface2": "F2F2F4",
+        "border": "E0E0E0",
+        "text3": "8590A6",
+        "good": "1AAF6C",
+        "bad": "E0445A",
+        "warn": "F5A524",
+        "isDark": false
+      },
+      "description": "Y2K铬银",
+      "tags": []
+    }
+  }
+}

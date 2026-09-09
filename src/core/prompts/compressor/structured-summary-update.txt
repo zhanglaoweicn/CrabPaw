@@ -1,0 +1,17 @@
+{{SUMMARY_PREFIX}}
+
+## 活跃任务
+[用户最近的未完成请求 — 从此处继续]{{taskProgressSection}}
+
+## 迭代更新
+
+以下是基于之前摘要和新增对话的更新：
+
+### 新增对话要点
+{{conversationDigest}}
+
+### 之前摘要（保留所有仍相关的信息）
+{{previousSummary}}
+{{focusSection}}{{keyFactsSection}}
+## 关键上下文
+[必须保留的重要信息，绝不包含API密钥/密码/凭证]{{SUMMARY_END_MARKER}}

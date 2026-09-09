@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CrabPaw · 老板视角体验优化 Demo</title>
+<style>
+  :root {
+    --bg: #0b0f1d;
+    --bg2: #0e1528;
+    --panel: #141d36;
+    --panel2: #1a2544;
+    --panel3: #212d52;
+    --border: #29355c;
+    --border2: #33406c;
+    --text: #e8ecf7;
+    --muted: #98a4c6;
+    --faint: #6d7897;
+    --brand: #7c6bff;
+    --brand2: #9b8bff;
+    --teal: #2fd6a7;
+    --amber: #f5b455;
+    --red: #ff6b7a;
+    --shadow: 0 24px 60px rgba(0,0,0,.45);
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+    background:
+      radial-gradient(1100px 620px at 82% -8%, rgba(124,107,255,.16), transparent 60%),
+      radial-gradient(900px 560px at -6% 108%, rgba(47,214,167,.10), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  /* Top demo bar */
+  .demo-bar {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 10px 18px;
+    background: rgba(11,15,29,.78);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(51,64,108,.45);
+  }
+  .demo-brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; letter-spacing: 0; }
+  .demo-brand .crab { font-size: 16px; filter: drop-shadow(0 0 8px rgba(124,107,255,.5)); }
+  .demo-brand small { color: var(--muted); font-weight: 500; }
+  .demo-toggle { display: flex; gap: 4px; padding: 3px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+  .demo-toggle button {
+    border: 0; background: transparent; color: var(--muted); cursor: pointer;
+    padding: 6px 12px; border-radius: 7px; font-size: 13px; font-weight: 600; letter-spacing: 0;
+    transition: .15s;
+  }
+  .demo-toggle button.active { background: linear-gradient(135deg,#4f8cff,#3572ff); color: #fff; box-shadow: 0 4px 14px rgba(53,114,255,.35); }
+  .demo-toggle button:not(.active):hover { color: var(--text); }
+  .demo-note { margin-left: auto; font-size: 12px; color: var(--faint); letter-spacing: 0; }
+
+  /* Layout */
+  .stage { padding: 22px 18px 40px; max-width: 1320px; margin: 0 auto; }
+  .frames { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+  .frames.dual .frame { flex: 1 1 470px; }
+  .frame { width: min(100%, 620px); }
+
+  /* App window */
+  .win { background: linear-gradient(180deg, var(--bg2), var(--bg)); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden; min-height: 540px; }
+  .win-titlebar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: rgba(12,17,32,.85); border-bottom: 1px solid var(--border); }
+  .win-dots { display: flex; gap: 6px; }
+  .win-dots span { width: 11px; height: 11px; border-radius: 50%; }
+  .win-dots .r { background: #ff5f57; } .win-dots .y { background: #febc2e; } .win-dots .g { background: #28c840; }
+  .win-title { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+  .win-title .crab { font-size: 13px; }
+  .win-winctl { margin-left: auto; display: flex; gap: 4px; opacity: .55; }
+  .win-winctl span { width: 11px; height: 11px; border: 1px solid var(--border2); border-radius: 3px; }
+
+  /* Header */
+  .app-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .app-brand { display: flex; align-items: center; gap: 7px; font-weight: 800; font-size: 14px; }
+  .app-brand .crab { font-size: 16px; filter: drop-shadow(0 0 8px rgba(124,107,255,.55)); }
+  .app-header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .hbtn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); border-radius: 9px; padding: 6px 10px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: .15s; }
+  .hbtn:hover { color: var(--text); background: var(--panel2); border-color: var(--border2); }
+  .hbtn svg { width: 14px; height: 14px; stroke: currentColor; }
+  .hbtn.only { padding: 7px; }
+  .hbtn.only.no-label svg { width: 14px; }
+  .hbtn.accent { background: linear-gradient(135deg,#4f8cff,#3572ff); color: #fff; border-color: transparent; }
+  .hbtn.accent:hover { background: linear-gradient(135deg,#5b96ff,#4477ff); color: #fff; }
+
+  /* Body */
+  .app-body { display: flex; gap: 14px; padding: 16px; min-height: 440px; }
+  .app-left { display: flex; flex-direction: column; gap: 14px; width: 132px; flex-shrink: 0; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
+  .card-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 10px; }
+
+  /* Heartbeat card */
+  .ecg { position: relative; height: 42px; margin: 4px 0 8px; }
+  .ecg svg { width: 100%; height: 100%; }
+  .ecg .line { fill: none; stroke: var(--teal); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 4px rgba(47,214,167,.5)); }
+  .pulse-dot { position: absolute; top: 2px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 0 rgba(47,214,167,.6); animation: beat 1.4s infinite; }
+  @keyframes beat { 0%{box-shadow:0 0 0 0 rgba(47,214,167,.55)} 60%{box-shadow:0 0 0 9px rgba(47,214,167,0)} 100%{box-shadow:0 0 0 0 rgba(47,214,167,0)} }
+  .svc { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--muted); padding: 4px 0; }
+  .svc .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); }
+  .svc .dot.warn { background: var(--amber); } .svc .dot.off { background: var(--faint); }
+
+  /* Voice orb */
+  .orb-wrap { display: flex; justify-content: center; padding: 6px 0 2px; }
+  .orb { position: relative; width: 92px; height: 92px; border-radius: 50%; cursor: pointer;
+    background: radial-gradient(circle at 34% 30%, #a98fff, #7c6bff 45%, #4b3aa8 82%);
+    box-shadow: 0 0 34px rgba(124,107,255,.5), inset 0 0 20px rgba(255,255,255,.12); }
+  .orb::after { content:""; position:absolute; inset:-7px; border-radius:50%; border:1px solid transparent; border-top-color: rgba(255,255,255,.4); animation: spin 3.5s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .orb.muted { filter: saturate(.5) brightness(.8); }
+  .orb-label { text-align: center; font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .microw { display:flex; justify-content:center; gap:6px; margin-top:8px; }
+  .microw button { border:1px solid var(--border); background: var(--panel2); color: var(--muted); border-radius: 8px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
+
+  /* Chat / empty */
+  .app-main { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; overflow: hidden; }
+  .chat-topbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .chat-topbar .title { font-weight: 700; font-size: 13px; }
+  .focus { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--muted); background: var(--panel2); padding: 4px 9px; border-radius: 99px; }
+  .focus .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); }
+  .chat-topbar .spacer { margin-left: auto; }
+  .chat-topbar .mini { border:1px solid var(--border); background: var(--panel2); color: var(--muted); border-radius: 8px; padding: 4px 8px; font-size: 11.5px; cursor: pointer; }
+
+  .chat-area { flex: 1; padding: 20px 18px; overflow: auto; display: flex; flex-direction: column; }
+  .empty { margin: auto 0; display: flex; flex-direction: column; gap: 14px; }
+
+  .badge-onboard { display: flex; align-items: center; gap: 10px; background: linear-gradient(135deg, rgba(124,107,255,.16), rgba(47,214,167,.10)); border: 1px solid var(--border2); border-radius: 11px; padding: 11px 13px; }
+  .badge-onboard .ico { font-size: 16px; }
+  .badge-onboard .tx { flex:1; }
+  .badge-onboard .tx b { display:block; font-size: 12.5px; }
+  .badge-onboard .tx span { font-size: 11.5px; color: var(--muted); }
+  .badge-onboard button { border:0; background: transparent; color: var(--muted); cursor:pointer; font-size: 15px; line-height:1; }
+  .badge-onboard button:hover { color: var(--text); }
+
+  .scen-row { display: flex; gap: 7px; flex-wrap: wrap; }
+  .scen { border:1px solid var(--border); background: var(--panel2); color: var(--muted); border-radius: 99px; padding: 5px 11px; font-size: 11.5px; cursor: pointer; }
+  .scen:hover { color: var(--text); }
+  .scen.active { background: rgba(124,107,255,.2); color: #cfc6ff; border-color: var(--brand); }
+
+  .empty-hint { font-size: 12px; color: var(--faint); }
+  .empty-hint.voice { text-align: center; padding: 10px 0; }
+  .empty-title { font-size: 19px; font-weight: 800; letter-spacing: 0; line-height: 1.35; }
+  .empty-title .accent { color: var(--brand2); }
+
+  .suggest { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { border:1px solid var(--border2); background: var(--panel2); color: var(--text); border-radius: 99px; padding: 8px 13px; font-size: 12.5px; cursor: pointer; transition: .15s; }
+  .chip:hover { transform: translateY(-1px); border-color: var(--brand); background: var(--panel3); }
+
+  /* Input */
+  .input-row { display: flex; align-items: center; gap: 9px; background: var(--bg2); border: 1px solid var(--border2); border-radius: 12px; padding: 9px 10px 9px 12px; }
+  .input-row .clip { flex-shrink:0; border:1px solid var(--border); background: var(--panel2); color: var(--muted); border-radius:8px; padding:5px; cursor:pointer; }
+  .input-row input { flex:1; background: transparent; border:0; outline:none; color: var(--text); font-size: 13.5px; font-family: inherit; }
+  .input-row input::placeholder { color: var(--faint); }
+  .send { flex-shrink:0; width: 34px; height: 34px; border:0; border-radius: 10px; cursor:pointer; background: linear-gradient(135deg,#4f8cff,#3572ff); color:#fff; display:flex; align-items:center; justify-content:center; transition:.15s; }
+  .send:hover { background: linear-gradient(135deg,#5b96ff,#4477ff); }
+  .send svg { width: 15px; height: 15px; }
+  .input-after { font-size: 11px; color: var(--faint); margin: 4px 2px 0; }
+
+  /* Diagnostic drawer */
+  .diag { margin-top: 12px; background: rgba(10,15,29,.6); border: 1px solid var(--border); border-radius: 11px; overflow: hidden; }
+  .diag-head { display:flex; align-items:center; gap:8px; padding:8px 12px; font-size:11.5px; color:var(--muted); cursor:default; border-bottom:1px solid var(--border); }
+  .diag-head .lg { display:flex; gap:5px; margin-left:auto; }
+  .diag-head .lg span { width:7px; height:7px; border-radius:50%; }
+  .diag-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; padding:10px 12px; }
+  .dstat { background: var(--panel2); border:1px solid var(--border); border-radius:8px; padding:7px 9px; }
+  .dstat b { display:block; font-size:14px; }
+  .dstat span { font-size:10.5px; color: var(--faint); }
+  .diag-log { padding: 4px 12px 10px; display:flex; flex-direction:column; gap:5px; }
+  .dlog { display:flex; gap:6px; font-size:11px; color:var(--muted); font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+  .dlog .t { color: var(--faint); } .dlog .ok { color: var(--teal); } .dlog .warn { color: var(--amber); }
+
+  /* Messages */
+  .msg { display: flex; gap: 9px; max-width: 92%; animation: fade .25s ease; }
+  @keyframes fade { from { opacity:0; transform: translateY(6px);} to {opacity:1; transform:none;} }
+  .msg.user { align-self: flex-end; }
+  .msg.ai { align-self: flex-start; }
+  .msg .av { flex-shrink:0; width: 26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:13px; }
+  .msg.user .av { background: var(--panel3); }
+  .msg.ai .av { background: linear-gradient(135deg,#7c6bff,#4b3aa8); }
+  .msg .bubble { background: var(--panel2); border:1px solid var(--border); border-radius:12px; padding:9px 12px; font-size:13px; line-height:1.5; }
+  .msg.user .bubble { background: rgba(53,114,255,.16); border-color: rgba(53,114,255,.35); }
+  .msg .who { font-size:10.5px; color:var(--faint); margin-bottom:3px; }
+
+  /* Annotation badges */
+  .note { position:absolute; z-index:4; display:flex; align-items:center; gap:5px; }
+  .note .n { width:21px; height:21px; border-radius:50%; background: var(--amber); color:#1c1508; font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; box-shadow:0 0 0 4px rgba(245,180,85,.18); }
+  .note .tip { background: rgba(10,15,29,.92); border:1px solid var(--border2); border-radius:7px; padding:5px 8px; font-size:11px; color:var(--text); max-width:150px; white-space:normal; line-height:1.4; box-shadow:0 8px 22px rgba(0,0,0,.4); }
+  .frame { position: relative; }
+
+  /* Legend */
+  .legend { margin-top: 22px; background: var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px 18px; }
+  .legend h3 { margin:0 0 12px; font-size:14px; font-weight:800; }
+  .legend .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:10px; }
+  .lg-item { display:flex; gap:9px; align-items:flex-start; background: var(--bg2); border:1px solid var(--border); border-radius:10px; padding:10px 12px; }
+  .lg-item .n { flex-shrink:0; width:21px; height:21px; border-radius:50%; background: var(--amber); color:#1c1508; font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+  .lg-item b { font-size:12.5px; }
+  .lg-item p { margin:3px 0 0; font-size:11.5px; color: var(--muted); line-height:1.45; }
+
+  .footer { text-align:center; font-size:11.5px; color: var(--faint); padding: 18px 12px 30px; }
+  .tag { display:inline-block; font-size:10.5px; font-weight:700; color:var(--muted); background:var(--panel2); border:1px solid var(--border); border-radius:6px; padding:2px 7px; margin-bottom:8px; letter-spacing:.5px; }
+  .both-meta { text-align:center; margin-bottom:14px; color:var(--muted); font-size:12.5px; }
+
+  @media (max-width: 640px) {
+    .app-left { width: 100%; flex-direction: row; }
+    .app-body { flex-direction: column; }
+    .note .tip { display:none; }
+  }
+</style>
+</head>
+<body>
+  <div class="demo-bar">
+    <div class="demo-brand"><span class="crab">🦀</span> CrabPaw <small>· 老板视角体验优化 Demo</small></div>
+    <div class="demo-toggle">
+      <button data-mode="before">现状</button>
+      <button data-mode="after" class="active">优化版</button>
+      <button data-mode="both">对比</button>
+    </div>
+    <div class="demo-note">源自 GUI 首页审查 · 2026-09-10</div>
+  </div>
+
+  <div class="stage">
+    <div class="both-meta" id="bothMeta" style="display:none"></div>
+    <div class="frames" id="frames"></div>
+
+    <div class="legend">
+      <h3>这 5 条建议在 Demo 里对应哪里</h3>
+      <div class="grid">
+        <div class="lg-item"><span class="n">1</span><div><b>顶栏图标换成“图标 + 文字”</b><p>管理舱/设置入口直接写“设置”，老板不用靠悬停猜。</p></div></div>
+        <div class="lg-item"><span class="n">2</span><div><b>空态改成“先打字提问”</b><p>把语音提示降级，突出可直接输入的对话框与问候语。</p></div></div>
+        <div class="lg-item"><span class="n">3</span><div><b>快捷建议换成业务场景句</b><p>从“看股票/热点”改成“这周生意、跟进客户、写份周报”。</p></div></div>
+        <div class="lg-item"><span class="n">4</span><div><b>工程诊断默认收起</b><p>事务/工具/记忆/日志等排障面板藏进“进阶视图”，老板默认看不到。</p></div></div>
+        <div class="lg-item"><span class="n">5</span><div><b>首次进入选业务场景</b><p>让老板勾选“想让它做什么”，据此偏置建议与提示。</p></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">🎨 这是一个可交互的前端原型，用于展示“老板视角”的首页优化方向，不代表已修改线上产品。</div>
+
+<script>
+const ICONS = {
+  settings: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>',
+  layout: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>',
+  reset: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
+  history: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  minus: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>',
+  square: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>',
+  clip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>',
+};
+
+const SCENARIOS = {
+  business: { label: '生意经营', chips: ['看看这周生意怎么样', '生成一份经营周报', '跟进老客户回款', '盘一下库存'] },
+  customer: { label: '客户跟进', chips: ['给客户拟一段跟进消息', '整理今天的客户沟通', '起草一份报价单', '约客户下周拜访'] },
+  team: { label: '团队协作', chips: ['安排明天的团队日程', '转成团队待办', '写一份会议纪要', '生成进度汇报'] },
+  doc: { label: '文档/合规', chips: ['起草一份合同', '把文档转成 Word', '生成产品说明', '整理发票/单据'] },
+  info: { label: '资讯洞察', chips: ['今天行业有什么热点', '看看今天的行情', '生成一个网页', '写一篇公众号'] },
+};
+
+const state = { mode: 'after', scenario: 'business', chat: [], showDiag: false, onboard: true };
+
+function hearts() { return [29,32,28,31,36,30,26,31,34,28,32]; }
+function ecgSvg() {
+  const pts = hearts().map((v,i)=> `${i*13},${44-v}`).join(' ');
+  return '<svg viewBox="0 0 130 48" preserveAspectRatio="none"><polyline class="line" points="' + pts + '"/></svg>';
+}
+
+function winTitle() {
+  return '<div class="win-titlebar"><div class="win-dots"><span class="r"></span><span class="y"></span><span class="g"></span></div><div class="win-title"><span class="crab">🦀</span> CrabPaw — 工作台</div><div class="win-winctl"><span></span><span></span><span></span></div></div>';
+}
+
+function heartCard() {
+  return `<div class="card"><div class="card-title">◉ 心跳</div><div class="ecg"><span class="pulse-dot"></span>${ecgSvg()}</div>
+    <div class="svc"><span class="dot"></span>主服务 · 已连接</div>
+    <div class="svc"><span class="dot warn"></span>语音引擎 · 就绪</div>
+    <div class="svc"><span class="dot off"></span>企微通道 · 未配置</div></div>`;
+}
+
+function orbCard(extra) {
+  const muted = extra && extra.muted;
+  return `<div class="card"><div class="card-title">◉ 语音</div><div class="orb-wrap"><div class="orb${muted ? ' muted':''}"></div></div>
+    <div class="orb-label">${muted ? '已静音 · 点开声音' : '按住空格说话'}</div>
+    <div class="microw"><button>唤醒词</button><button>专注</button><button>实时</button></div></div>`;
+}
+
+function beforeChips() {
+  return ['开始会议纪要','我的近期日程','今天有什么热点新闻','看看今天的股票行情','生成一个网页'];
+}
+
+function note(item, x, y) {
+  if (state.mode === 'before') return '';
+  const tip = item.tip || '';
+  const tipHtml = tip ? '<span class="tip">' + tip + '</span>' : '';
+  return `<div class="note" style="top:${y};left:${x}"><span class="n">${item.n}</span>${tipHtml}</div>`;
+}
+
+function beforeFrame() {
+  const now = state.chat;
+  return `<div class="win">
+    ${winTitle()}
+    <div class="app-header">
+      <div class="app-brand"><span class="crab">🦀</span> CrabPaw</div>
+      <div class="app-header-right">
+        <button class="hbtn only no-label" title="高级面板" onclick="toast('（现状）裸图标：只有悬停才看到“高级面板”')">${ICONS.layout}</button>
+        <button class="hbtn only no-label" title="恢复默认布局" onclick="toast('（现状）裸图标：恢复默认布局')">${ICONS.reset}</button>
+        <button class="hbtn only no-label" title="系统管理（设置/插件/技能/用量）" onclick="toast('（现状）老板不知道这图标就是“设置”')">${ICONS.settings}</button>
+        <button class="hbtn only no-label" title="历史会话" onclick="toast('（现状）裸图标：历史会话')">${ICONS.history}</button>
+      </div>
+    </div>
+    <div class="app-body">
+      <div class="app-left">${heartCard()}${orbCard({muted:true})}</div>
+      <div class="app-main">
+        <div class="chat-topbar"><span class="title">💬</span><span class="focus"><span class="dot"></span>等待输入</span><span class="spacer"></span><button class="mini">清空</button></div>
+        <div class="chat-area">
+          <div class="empty">
+            <div class="empty-hint voice">说「小螃蟹」或直接输入文字开始对话</div>
+            <div class="empty-hint" style="text-align:center;color:var(--faint);margin-top:-4px">（当前只强调「开口说话」，文字入口毫不起眼）</div>
+            <div class="suggest" style="justify-content:center">${beforeChips().map(c=>`<button class="chip" onclick="toast('（现状）这条会走语音面板，需先唤醒/说话')">${c}</button>`).join('')}</div>
+          </div>
+        </div>
+        <div class="diag">
+          <div class="diag-head">◉ 工程诊断 · 事件日志<span class="lg"><span style="background:var(--teal)"></span><span style="background:var(--amber)"></span><span style="background:var(--faint)"></span></span></div>
+          <div class="diag-stats">
+            <div class="dstat"><b>128</b><span>事务</span></div>
+            <div class="dstat"><b>46</b><span>工具</span></div>
+            <div class="dstat"><b>9</b><span>记忆衰减</span></div>
+          </div>
+          <div class="diag-log">
+            <div class="dlog"><span class="t">10:21</span><span class="ok">✓ 读取-订单表</span></div>
+            <div class="dlog"><span class="t">10:21</span><span class="ok">✓ 调用-生成报表</span></div>
+            <div class="dlog"><span class="t">10:22</span><span class="warn">⚠ 连接超时</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  ${note({n:1, tip:'全是裸图标，无文字标签'}, 268, 62)}
+  ${note({n:2, tip:'空态 100% 强调“开口说话”'}, 250, 100)}
+  ${note({n:3, tip:'建议是消费/资讯向'}, 250, 168)}
+  ${note({n:4, tip:'工程诊断默认可见'}, 260, 350)}
+  `;
+}
+
+function afterFrame() {
+  const scen = SCENARIOS[state.scenario];
+  const onboard = state.onboard ? true : false;
+  const msgs = state.chat.map(m => {
+    const av = m.role === 'user' ? 'YOU' : 'AI';
+    return `<div class="msg ${m.role}"><span class="av">${m.role==='user'?'🧑':'🦀'}</span><div><div class="who">${m.role==='user'?'YOU':'CrabPaw'}</div><div class="bubble">${m.text}</div></div></div>`;
+  }).join('');
+  const diagHtml = state.showDiag ? `<div class="diag">
+      <div class="diag-head">工程诊断 · 事件日志（进阶视图，已收起）</div>
+      <div class="diag-stats">
+        <div class="dstat"><b>128</b><span>事务</span></div>
+        <div class="dstat"><b>46</b><span>工具</span></div>
+        <div class="dstat"><b>9</b><span>记忆衰减</span></div>
+      </div>
+      <div class="diag-log"><div class="dlog"><span class="t">10:21</span><span class="ok">✓ 读取-订单表</span></div><div class="dlog"><span class="t">10:22</span><span class="warn">⚠ 连接超时</span></div></div>
+    </div>` : '';
+  return `<div class="win">
+    ${winTitle()}
+    <div class="app-header">
+      <div class="app-brand"><span class="crab">🦀</span> CrabPaw</div>
+      <div class="app-header-right">
+        <button class="hbtn" title="布局"><span>${ICONS.layout}</span>布局</button>
+        <button class="hbtn accent" title="设置" onclick="toast('（优化）管理舱改成带文字的“设置”按钮')"><span>${ICONS.settings}</span>设置</button>
+        <button class="hbtn" title="历史会话" onclick="toast('（优化）历史会话，带文字')"><span>${ICONS.history}</span>历史</button>
+        <button class="hbtn" title="收起/展开诊断面板" onclick="toggleDiag()">${ICONS.reset}</button>
+      </div>
+    </div>
+    <div class="app-body">
+      <div class="app-left">${heartCard()}${orbCard({})}</div>
+      <div class="app-main">
+        <div class="chat-topbar"><span class="title">💬</span><span class="focus"><span class="dot"></span>${state.scenario==='business'?'随时回答生意问题':'待命'}</span><span class="spacer"></span><button class="mini" onclick="resetChat()">清空</button></div>
+        <div class="chat-area">
+          ${msgs ? `<div style="display:flex;flex-direction:column;gap:12px">${msgs}</div>` : `
+          <div class="empty">
+            ${onboard ? `<div class="badge-onboard"><span class="ico">🎯</span><div class="tx"><b>先选一个你常用的场景</b><span>建议会按它调整，随时可改</span></div><button onclick="dismissOnboard()">✕</button></div>` : ''}
+            <div class="scen-row">${Object.entries(SCENARIOS).map(([k,v])=>`<button class="scen${state.scenario===k?' active':''}" onclick="setScenario('${k}')">${v.label}</button>`).join('')}</div>
+            <div class="empty-title">嗨，今天想让 <span class="accent">CrabPaw</span> 帮你做什么？</div>
+            <div class="input-row">
+              <button class="clip" title="上传附件">${ICONS.clip}</button>
+              <input id="inp" placeholder="直接打字提问，或点下面的场景后说话…" onkeydown="onEnter(event)" />
+              <button class="send" onclick="sendInput()">${ICONS.send}</button>
+            </div>
+            <div class="input-after">文字优先 · 空格键也能说话 · 说「小螃蟹」或直接打字都可以</div>
+            <div class="suggest">${scen.chips.map(c=>`<button class="chip" onclick="sendChip('${c}')">${c}</button>`).join('')}</div>
+          </div>`}
+          ${diagHtml}
+        </div>
+      </div>
+    </div>
+  </div>
+  ${note({n:1, tip:'顶栏图标都带文字'}, 300, 62)}
+  ${note({n:2, tip:'空态“先打字提问”'}, 252, 96)}
+  ${note({n:3, tip:'业务场景句，随场景变化'}, 252, 300)}
+  ${note({n:4, tip:'诊断藏进进阶，默认收起'}, 250, 190)}
+  ${note({n:5, tip:'首次进入选业务场景'}, 250, 112)}
+  `;
+}
+
+function render() {
+  const frames = document.getElementById('frames');
+  const dual = state.mode === 'both';
+  frames.className = 'frames' + (dual ? ' dual' : '');
+  document.getElementById('bothMeta').style.display = dual ? 'block' : 'none';
+  document.getElementById('bothMeta').textContent = dual ? '左：现状　·　右：优化版（黄色数字＝改了什么）' : '';
+  if (state.mode === 'before') frames.innerHTML = beforeFrame();
+  else if (state.mode === 'after') frames.innerHTML = afterFrame();
+  else frames.innerHTML = beforeFrame() + afterFrame();
+}
+
+function setScenario(k) { state.scenario = k; render(); }
+function toggleDiag() { state.showDiag = !state.showDiag; render(); }
+function dismissOnboard() { state.onboard = false; render(); }
+function resetChat() { state.chat = []; render(); }
+
+function sendChip(text) { state.chat.push({role:'user', text}); state.chat.push({role:'ai', text:'好的，我来帮你处理「' + text + '」。我先查一下你最近的数据…'}); render(); }
+function sendInput() { const inp = document.getElementById('inp'); if (!inp || !inp.value.trim()) return; state.chat.push({role:'user', text:inp.value.trim()}); state.chat.push({role:'ai', text:'好的，我来帮你处理「' + inp.value.trim() + '」…'}); render(); }
+function onEnter(e) { if (e.key === 'Enter') sendInput(); }
+
+document.querySelectorAll('.demo-toggle button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.demo-toggle button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); state.mode = b.dataset.mode; render();
+  });
+});
+
+function toast(msg){ console.log(msg); }
+render();
+</script>
+</body>
+</html>

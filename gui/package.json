@@ -1,0 +1,269 @@
+{
+  "name": "crabpaw-gui",
+  "version": "2.2.0",
+  "description": "CrabPaw Desktop GUI - Electron + React",
+  "main": "dist-electron/main/index.js",
+  "author": "CrabPaw Team",
+  "license": "MIT",
+  "scripts": {
+    "gen:ui-registry": "node scripts/gen-ui-registry.js",
+    "dev": "vite",
+    "dev:desktop": "node scripts/dev-desktop.js",
+    "build": "vite build && npm run rebuild && electron-builder",
+    "build:vite": "tsc && vite build",
+    "build:portable": "npm run rebuild && vite build && electron-builder --config.win.target=dir",
+    "preview": "vite preview",
+    "electron:dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "postinstall": "node -e \"try{require('@electron/rebuild').rebuild().catch(function(e){console.log('[optional] @electron/rebuild failed:', e?.message||e)})}catch(e){console.log('[optional] @electron/rebuild not found, skip native rebuild:', e.message)}\"",
+    "rebuild": "npx @electron/rebuild -f -w sherpa-onnx-node",
+    "test:e2e": "npx playwright test",
+    "test:e2e:ui": "npx playwright test --ui",
+    "test:e2e:headed": "npx playwright test --headed",
+    "test:e2e:dev": "node e2e/run-dev-tests.js",
+    "test:e2e:dev:headed": "node e2e/run-dev-tests.js --headed"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@types/katex": "^0.16.8",
+    "@types/three": "^0.185.1",
+    "clsx": "^2.0.0",
+    "cron-parser": "^5.5.0",
+    "cronstrue": "^2.48.0",
+    "katex": "^0.17.0",
+    "leaflet": "1.9.4",
+    "lucide-react": "^0.294.0",
+    "mermaid": "^11.15.0",
+    "pinyin-pro": "^3.26.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-markdown": "^9.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "sherpa-onnx-node": "^1.13.3",
+    "sonner": "^1.2.2",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@babel/plugin-transform-react-jsx": "8.0.1",
+    "@electron/rebuild": "^3.6.0",
+    "@playwright/test": "1.45.3",
+    "@tailwindcss/typography": "^0.5.19",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/react": "16.3.2",
+    "@types/leaflet": "1.9.22",
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^8.2.2",
+    "electron": "43.4.0",
+    "electron-builder": "^24.9.1",
+    "electron-icon-builder": "^2.0.1",
+    "electron-packager": "^17.1.2",
+    "jest-environment-jsdom": "29.7.0",
+    "jsdom": "29.1.1",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.3.6",
+    "typescript": "^5.3.2",
+    "vite": "^5.0.8",
+    "vite-plugin-electron": "^0.28.0",
+    "vite-plugin-electron-renderer": "^0.14.5",
+    "vitest": "4.1.11",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.crabpaw.desktop",
+    "productName": "CrabPaw",
+    "directories": {
+      "output": "../../CrabPaw-Release"
+    },
+    "icon": "build/icons/win/icon.ico",
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/node.exe",
+        "to": "node.exe"
+      },
+      {
+        "from": "resources/npm",
+        "to": "npm"
+      },
+      {
+        "from": "resources/npm.cmd",
+        "to": "npm.cmd"
+      },
+      {
+        "from": "resources/npx.cmd",
+        "to": "npx.cmd"
+      },
+      {
+        "from": "resources/kws-model",
+        "to": "resources/kws-model"
+      },
+      {
+        "from": "build/icons",
+        "to": "build/icons"
+      },
+      {
+        "from": "../src",
+        "to": "src",
+        "filter": [
+          "**/*.js",
+          "**/*.json",
+          "**/*.md",
+          "**/*.yaml",
+          "**/*.yml",
+          "!**/.env",
+          "!**/.env.*",
+          "!**/test/**",
+          "!**/tests/**",
+          "!**/__tests__/**",
+          "!**/*.test.js",
+          "!**/*.spec.js",
+          "!**/*.test.ts",
+          "!**/__mocks__/**",
+          "!**/__fixtures__/**"
+        ]
+      },
+      {
+        "from": "../skills",
+        "to": "skills",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../data",
+        "to": "data",
+        "filter": [
+          "**/*",
+          "!**/.crabpaw/**",
+          "!**/projects/**",
+          "!**/workspace/**",
+          "!**/skills/**",
+          "!**/.env",
+          "!**/.env.*",
+          "!**/cloakbrowser/**",
+          "!**/playwright-browsers/**",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/*.dist-info/**",
+          "!**/*.log",
+          "!**/*.db",
+          "!**/*.db-shm",
+          "!**/*.db-wal",
+          "!**/*.png",
+          "!**/*.mp4",
+          "!**/*.docx",
+          "!**/*.日报*",
+          "!**/*日报*"
+        ]
+      },
+      {
+        "from": "../node_modules",
+        "to": "node_modules",
+        "filter": [
+          "**/*",
+          "!playwright/**",
+          "!@playwright/**",
+          "!electron/**",
+          "!jest/**",
+          "!@types/**",
+          "!@typescript-eslint/**",
+          "!@babel/**",
+          "!typescript/**",
+          "!eslint/**",
+          "!prettier/**",
+          "!vite/**",
+          "!@vitejs/**",
+          "!@electron/**",
+          "!**/.bin/**",
+          "!**/.cache/**",
+          "!**/prebuilds/**",
+          "!**/test/**",
+          "!**/tests/**",
+          "!**/__tests__/**",
+          "!**/*.d.ts",
+          "!**/*.map",
+          "!**/README*",
+          "!**/CHANGELOG*",
+          "!**/HISTORY*",
+          "!**/LICENSE*",
+          "!**/.github/**",
+          "!**/.eslintrc*",
+          "!**/.prettierrc*",
+          "!**/tsconfig.json",
+          "!**/.travis.yml",
+          "!**/Makefile"
+        ]
+      },
+      {
+        "from": "node_modules/sherpa-onnx-node",
+        "to": "node_modules/sherpa-onnx-node"
+      },
+      {
+        "from": "node_modules/sherpa-onnx-win-x64",
+        "to": "node_modules/sherpa-onnx-win-x64"
+      },
+      {
+        "from": "../package.json",
+        "to": "package.json"
+      },
+      {
+        "from": "../portable/python",
+        "to": "portable/python",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../portable/ffmpeg",
+        "to": "portable/ffmpeg",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "forceCodeSigning": false
+    },
+    "portable": {
+      "artifactName": "CrabPaw-${version}-Portable.exe",
+      "requestExecutionLevel": "user",
+      "unpackDirName": "CrabPaw-Portable"
+    },
+    "nsis": {
+      "artifactName": "CrabPaw-${version}-Setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CrabPaw",
+      "uninstallDisplayName": "CrabPaw AI Agent",
+      "installerIcon": "build/icons/win/icon.ico",
+      "uninstallerIcon": "build/icons/win/icon.ico",
+      "installerHeaderIcon": "build/icons/win/icon.ico"
+    }
+  }
+}

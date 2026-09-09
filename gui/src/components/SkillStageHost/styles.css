@@ -1,0 +1,240 @@
+/* SkillStageHost — 技能执行全息卡（2026-08-04,复用 DocReader 全息视觉语言） */
+
+.skill-stage {
+  position: fixed;
+  top: 15%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: var(--z-skill-stage); /* 低于 DocReader(70)——文档场景让位全屏舱 */
+  pointer-events: none;
+}
+.skill-stage--enter { animation: skill-stage-in 0.35s ease-out; }
+.skill-stage--exit { opacity: 0; transform: translateX(-50%) translateY(-8px); transition: opacity 0.3s ease, transform 0.3s ease; }
+@keyframes skill-stage-in {
+  0% { opacity: 0; transform: translateX(-50%) translateY(10px) scale(0.96); filter: hue-rotate(30deg) brightness(1.4); }
+  100% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); filter: none; }
+}
+
+.skill-stage-card {
+  position: relative;
+  /* 2026-08-15: 自适应——小窗口视口封顶(参考实现 min() 口径) */
+  width: min(320px, 90vw);
+  padding: 16px 18px;
+  border-radius: 14px;
+  overflow: hidden;
+  pointer-events: auto;
+  background:
+    repeating-linear-gradient(0deg, rgba(160, 220, 255, 0.02) 0px, rgba(160, 220, 255, 0.02) 1px, transparent 1px, transparent 4px),
+    linear-gradient(135deg, rgba(24, 34, 62, 0.82), rgba(12, 16, 30, 0.78));
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow:
+    0 0 28px rgba(56, 189, 248, 0.12),
+    0 0 56px rgba(168, 85, 247, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+/* 全息渐变边框(mask 技术:只留 1px 边) */
+.skill-stage-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  padding: 1px;
+  background: linear-gradient(120deg,
+    rgba(56, 189, 248, 0.5),
+    rgba(168, 85, 247, 0.35) 40%,
+    rgba(236, 72, 153, 0.3) 70%,
+    rgba(56, 189, 248, 0.2));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* 扫描线(顶部细光带滑动) */
+.skill-stage-scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.8), transparent);
+  animation: skill-scan 2.6s linear infinite;
+  pointer-events: none;
+}
+@keyframes skill-scan {
+  0% { transform: translateY(0); opacity: 0.2; }
+  15% { opacity: 1; }
+  100% { transform: translateY(150px); opacity: 0; }
+}
+/* 顶部高光 */
+.skill-stage-glow {
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(180, 240, 255, 0.5), transparent);
+  pointer-events: none;
+}
+
+.skill-stage-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  position: relative;
+  z-index: 1;
+}
+.skill-stage-emoji {
+  font-size: 20px;
+  line-height: 1;
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.35));
+}
+.skill-stage-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(233, 243, 255, 0.95);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skill-stage-badge {
+  font-size: 10px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.skill-stage-badge--running { color: #f97316; border: 1px solid #f9731655; background: #f9731614; animation: skill-pulse 1.4s ease-in-out infinite; }
+.skill-stage-badge--success { color: #4ade80; border: 1px solid #4ade8055; background: #4ade8014; }
+.skill-stage-badge--error   { color: #f87171; border: 1px solid #f8717155; background: #f8717114; }
+@keyframes skill-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.skill-stage-close {
+  font-size: 11px;
+  color: rgba(148, 163, 184, 0.7);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.skill-stage-close:hover { color: #f87171; background: rgba(244, 67, 54, 0.1); }
+
+/* 步骤 */
+.skill-stage-steps {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  position: relative;
+  z-index: 1;
+}
+.skill-stage-step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: rgba(148, 163, 184, 0.55);
+  transition: color 0.3s;
+}
+.skill-stage-step.is-done { color: rgba(74, 222, 128, 0.9); }
+.skill-stage-step.is-active { color: #f97316; font-weight: 600; }
+.skill-stage-step-icon { width: 16px; text-align: center; }
+.skill-stage-step.is-active .skill-stage-step-icon { animation: skill-pulse 1.4s ease-in-out infinite; }
+
+/* 2026-08-12(P1-5): "处理中…"脉冲提示——取代盲推进步骤动画,不冒充进度 */
+.skill-stage-processing {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: rgba(249, 115, 22, 0.9);
+  letter-spacing: 0.08em;
+  animation: skill-pulse 1.4s ease-in-out infinite;
+  position: relative;
+  z-index: 1;
+}
+
+/* 进度条(渐变流光) */
+.skill-stage-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-top: 12px;
+  position: relative;
+  z-index: 1;
+}
+.skill-stage-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #f97316, #fbbf24, #38bdf8);
+  background-size: 200% 100%;
+  animation: skill-flow 2.2s linear infinite;
+  transition: width 0.6s ease;
+}
+@keyframes skill-flow {
+  0% { background-position: 0% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* 完成/失败结果 */
+.skill-stage-result {
+  margin-top: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  position: relative;
+  z-index: 1;
+}
+.skill-stage-check {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  animation: skill-pop 0.4s cubic-bezier(0.34, 1.5, 0.5, 1);
+}
+.skill-stage-check--ok { background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid #4ade8055; box-shadow: 0 0 12px rgba(74, 222, 128, 0.25); }
+.skill-stage-check--err { background: rgba(244, 67, 54, 0.15); color: #f87171; border: 1px solid #f8717155; box-shadow: 0 0 12px rgba(244, 67, 54, 0.25); }
+@keyframes skill-pop {
+  0% { transform: scale(0.3); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.skill-stage-result-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(228, 240, 255, 0.85);
+  min-width: 0;
+  word-break: break-all;
+}
+.skill-stage-result--error .skill-stage-result-text { color: rgba(248, 113, 113, 0.9); }
+.skill-stage-path {
+  margin-top: 4px;
+  font-size: 10px;
+  color: rgba(148, 163, 184, 0.65);
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+
+.skill-stage-hint {
+  font-size: 10px;
+  color: rgba(148, 163, 184, 0.45);
+  letter-spacing: 0.04em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skill-stage-scan, .skill-stage-badge--running, .skill-stage-progress-fill, .skill-stage-step.is-active .skill-stage-step-icon, .skill-stage-processing { animation: none !important; }
+}

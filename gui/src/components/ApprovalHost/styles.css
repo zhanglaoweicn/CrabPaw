@@ -1,0 +1,49 @@
+/* ApprovalHost — 全局审批宿主(2026-08-04,全息玻璃样式,双模式常驻) */
+
+.approval-host {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-approval); /* 高于配置弹窗(80),审批必须可见 */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(440px, 90vw);
+  pointer-events: none;
+}
+
+/* 2026-08-19 P2 接管: inline 变体——静态流式容器(VoiceShell 输入区上方),
+   非固定定位; 卡片横向并排, 高度收窄为紧凑单行卡 */
+.approval-host--inline {
+  position: static;
+  transform: none;
+  z-index: auto;
+  width: 100%;
+  flex-direction: row;
+  flex-wrap: wrap;
+  pointer-events: auto;
+  margin-bottom: 8px;
+}
+.approval-host--inline .approval-host-card {
+  flex: 1 1 340px;
+  min-width: 260px;
+  max-width: 100%;
+}
+.approval-host-card {
+  pointer-events: auto;
+  animation: approval-in 0.35s ease-out;
+}
+@keyframes approval-in {
+  0% { opacity: 0; transform: translateY(-10px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* 卡片内容套全息玻璃(ApprovalCard 自带 amber 样式,加一层容器质感) */
+.approval-host-card > div {
+  border-radius: 12px !important;
+  background: rgba(24, 30, 46, 0.92) !important;
+  backdrop-filter: blur(18px) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+  border: 1px solid rgba(251, 191, 36, 0.35) !important;
+  box-shadow: 0 0 24px rgba(251, 191, 36, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}

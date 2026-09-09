@@ -1,0 +1,1118 @@
+{
+  "savedAt": "2026-06-28T17:34:57.827Z",
+  "label": "v3",
+  "summary": {
+    "passed": 131,
+    "total": 131,
+    "passRate": "100.0%",
+    "totalDuration": 66
+  },
+  "byCategory": {
+    "tool_contract": {
+      "passed": 6,
+      "total": 6
+    },
+    "hooks": {
+      "passed": 28,
+      "total": 28
+    },
+    "task_mode": {
+      "passed": 5,
+      "total": 5
+    },
+    "loop_detection": {
+      "passed": 26,
+      "total": 26
+    },
+    "sandbox": {
+      "passed": 4,
+      "total": 4
+    },
+    "personalization": {
+      "passed": 5,
+      "total": 5
+    },
+    "autopilot": {
+      "passed": 6,
+      "total": 6
+    },
+    "harness_metrics": {
+      "passed": 5,
+      "total": 5
+    },
+    "harness_contracts": {
+      "passed": 3,
+      "total": 3
+    },
+    "harness_lifecycle": {
+      "passed": 7,
+      "total": 7
+    },
+    "workflow": {
+      "passed": 17,
+      "total": 17
+    },
+    "evolution": {
+      "passed": 8,
+      "total": 8
+    },
+    "skill_validate": {
+      "passed": 10,
+      "total": 10
+    },
+    "regression": {
+      "passed": 1,
+      "total": 1
+    }
+  },
+  "results": [
+    {
+      "id": "tc_001",
+      "suite": "Tool Contracts",
+      "name": "read tool enforces required file_path",
+      "category": "tool_contract",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tc_002",
+      "suite": "Tool Contracts",
+      "name": "read tool accepts valid input",
+      "category": "tool_contract",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tc_003",
+      "suite": "Tool Contracts",
+      "name": "Bash tool rejects unknown properties",
+      "category": "tool_contract",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tc_004",
+      "suite": "Tool Contracts",
+      "name": "Write tool requires content",
+      "category": "tool_contract",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tc_005",
+      "suite": "Tool Contracts",
+      "name": "Dynamic contract registration",
+      "category": "tool_contract",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tc_006",
+      "suite": "Tool Contracts",
+      "name": "Unknown tool passes with warning",
+      "category": "tool_contract",
+      "passed": "No contract: nonexistent_tool",
+      "error": null
+    },
+    {
+      "id": "hk_001",
+      "suite": "Hooks",
+      "name": "safety hook blocks rm -rf /",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_002",
+      "suite": "Hooks",
+      "name": "safety hook blocks mkfs command",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_003",
+      "suite": "Hooks",
+      "name": "safety hook blocks fork bomb",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_004",
+      "suite": "Hooks",
+      "name": "safety hook blocks format c:",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_005",
+      "suite": "Hooks",
+      "name": "safety hook allows safe commands",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_006",
+      "suite": "Hooks",
+      "name": "safety hook allows non-Bash tools",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_007",
+      "suite": "Hooks",
+      "name": "hook can modify params",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_008",
+      "suite": "Hooks",
+      "name": "hook can block execution with reason",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_009",
+      "suite": "Hooks",
+      "name": "hook returning false is treated as blocked",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_010",
+      "suite": "Hooks",
+      "name": "hooks execute in priority order (high first)",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_011",
+      "suite": "Hooks",
+      "name": "high-priority hook block stops chain",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_012",
+      "suite": "Hooks",
+      "name": "postToolUse hooks fire after execution",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_013",
+      "suite": "Hooks",
+      "name": "postToolUse hook error does not crash",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_014",
+      "suite": "Hooks",
+      "name": "command hook registration and structure",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_015",
+      "suite": "Hooks",
+      "name": "command hook with matcher triggers correctly",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_016",
+      "suite": "Hooks",
+      "name": "command hook matcher filters non-matching tools",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_017",
+      "suite": "Hooks",
+      "name": "http hook registration and structure",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_018",
+      "suite": "Hooks",
+      "name": "prompt hook registration",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_019",
+      "suite": "Hooks",
+      "name": "agent hook registration",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_020",
+      "suite": "Hooks",
+      "name": "stop hooks fire on triggerStopHooks",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_021",
+      "suite": "Hooks",
+      "name": "unresponsive hooks fire with duration",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_022",
+      "suite": "Hooks",
+      "name": "path permission hook allows workspace writes",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_023",
+      "suite": "Hooks",
+      "name": "tool blocked emits event",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_024",
+      "suite": "Hooks",
+      "name": "preToolUse emits event with correct data",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_025",
+      "suite": "Hooks",
+      "name": "getHookCounts returns correct totals",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_026",
+      "suite": "Hooks",
+      "name": "registerIntoRegistry adds preExecuteHook to toolRegistry",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_027",
+      "suite": "Hooks",
+      "name": "registerIntoRegistry gracefully handles unsupported registry",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hk_028",
+      "suite": "Hooks",
+      "name": "registerIntoRegistry hook blocks on contract violation",
+      "category": "hooks",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tm_001",
+      "suite": "Task Mode Detection",
+      "name": "detects 分析 task",
+      "category": "task_mode",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tm_002",
+      "suite": "Task Mode Detection",
+      "name": "quick translation is non-task",
+      "category": "task_mode",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tm_003",
+      "suite": "Task Mode Detection",
+      "name": "short question is non-task",
+      "category": "task_mode",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tm_004",
+      "suite": "Task Mode Detection",
+      "name": "架构设计 is task",
+      "category": "task_mode",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tm_005",
+      "suite": "Task Mode Detection",
+      "name": "very short msg is non-task",
+      "category": "task_mode",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_001",
+      "suite": "Loop Detection",
+      "name": "hashToolCall: 相同工具+参数产生相同哈希",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_002",
+      "suite": "Loop Detection",
+      "name": "hashToolCall: 不同工具产生不同哈希",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_003",
+      "suite": "Loop Detection",
+      "name": "hashToolCall: 不同参数产生不同哈希",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_004",
+      "suite": "Loop Detection",
+      "name": "hashToolCall: 支持 function.call 格式",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_005",
+      "suite": "Loop Detection",
+      "name": "stableToolKey: Read 工具合并相邻行号段",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_006",
+      "suite": "Loop Detection",
+      "name": "stableToolKey: Read 工具区分不同行号段",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_007",
+      "suite": "Loop Detection",
+      "name": "stableToolKey: 提取 salient 字段",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_008",
+      "suite": "Loop Detection",
+      "name": "normalizeToolCallArgs: 对象参数直接返回",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_009",
+      "suite": "Loop Detection",
+      "name": "normalizeToolCallArgs: JSON 字符串参数可解析",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_010",
+      "suite": "Loop Detection",
+      "name": "normalizeToolCallArgs: 非 JSON 字符串作为 fallbackKey",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_011",
+      "suite": "Loop Detection",
+      "name": "isHardRejection: 检测权限拒绝消息",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_012",
+      "suite": "Loop Detection",
+      "name": "isHardRejection: 正常错误不被误判",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_013",
+      "suite": "Loop Detection",
+      "name": "isHardRejection: 检测中文权限拒绝",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_014",
+      "suite": "Loop Detection",
+      "name": "isHardRejection: 空值返回 false",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_015",
+      "suite": "Loop Detection",
+      "name": "RepeatFailureGuard: 成功调用重置计数器",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_016",
+      "suite": "Loop Detection",
+      "name": "RepeatFailureGuard: 硬拒绝 3 次触发熔断",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_017",
+      "suite": "Loop Detection",
+      "name": "RepeatFailureGuard: 相同签名重复失败 5 次触发",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_018",
+      "suite": "Loop Detection",
+      "name": "RepeatFailureGuard: 无进展 8 次连续失败触发",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_019",
+      "suite": "Loop Detection",
+      "name": "RepeatFailureGuard: reset 清除所有状态",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_020",
+      "suite": "Loop Detection",
+      "name": "RepeatFailureGuard: getStats 返回正确的统计信息",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_021",
+      "suite": "Loop Detection",
+      "name": "LoopDetectionMiddleware: 构造函数正确设置默认值",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_022",
+      "suite": "Loop Detection",
+      "name": "LoopDetectionMiddleware: 自定义配置生效",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_023",
+      "suite": "Loop Detection",
+      "name": "LoopDetectionMiddleware: reset 清除线程状态",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_024",
+      "suite": "Loop Detection",
+      "name": "LoopDetectionMiddleware: recordToolResult 返回熔断消息",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_025",
+      "suite": "Loop Detection",
+      "name": "LoopDetectionMiddleware: 不同线程独立跟踪",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ld_026",
+      "suite": "Loop Detection",
+      "name": "阈值常量符合预期值",
+      "category": "loop_detection",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "sb_001",
+      "suite": "Sandbox",
+      "name": "docker-sandbox module loads",
+      "category": "sandbox",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "sb_002",
+      "suite": "Sandbox",
+      "name": "sandbox-tool module loads",
+      "category": "sandbox",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "sb_003",
+      "suite": "Sandbox",
+      "name": "DockerSandbox constructs with defaults",
+      "category": "sandbox",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "sb_004",
+      "suite": "Sandbox",
+      "name": "DockerSandbox generates valid Dockerfile",
+      "category": "sandbox",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "pe_001",
+      "suite": "Personalization",
+      "name": "detects Chinese language preference",
+      "category": "personalization",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "pe_002",
+      "suite": "Personalization",
+      "name": "detects concise tone preference",
+      "category": "personalization",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "pe_003",
+      "suite": "Personalization",
+      "name": "generates prompt fragment with detected prefs",
+      "category": "personalization",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "pe_004",
+      "suite": "Personalization",
+      "name": "setIdentity stores name",
+      "category": "personalization",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "pe_005",
+      "suite": "Personalization",
+      "name": "persists and loads profile",
+      "category": "personalization",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ap_001",
+      "suite": "Autopilot",
+      "name": "RepoTaskCard constructs and serializes",
+      "category": "autopilot",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ap_002",
+      "suite": "Autopilot",
+      "name": "Task card detects bugs and urgency",
+      "category": "autopilot",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ap_003",
+      "suite": "Autopilot",
+      "name": "Fingerprints deduplicate identical tasks",
+      "category": "autopilot",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ap_004",
+      "suite": "Autopilot",
+      "name": "AutopilotService intake + decide pipeline",
+      "category": "autopilot",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ap_005",
+      "suite": "Autopilot",
+      "name": "AutopilotService human gate blocks low-priority",
+      "category": "autopilot",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "ap_006",
+      "suite": "Autopilot",
+      "name": "AgentDefinition validates required fields",
+      "category": "autopilot",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hm_001",
+      "suite": "Harness Metrics",
+      "name": "MetricsPipeline creates with defaults",
+      "category": "harness_metrics",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hm_002",
+      "suite": "Harness Metrics",
+      "name": "recordLlmCallStart increments total count",
+      "category": "harness_metrics",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hm_003",
+      "suite": "Harness Metrics",
+      "name": "recordLlmCallSuccess records token usage",
+      "category": "harness_metrics",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hm_004",
+      "suite": "Harness Metrics",
+      "name": "recordToolCallStart/Success tracks count",
+      "category": "harness_metrics",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hm_005",
+      "suite": "Harness Metrics",
+      "name": "recordSession tracks lifecycle",
+      "category": "harness_metrics",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hc_001",
+      "suite": "Harness Contracts",
+      "name": "AgentContractValidator creates with defaults",
+      "category": "harness_contracts",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hc_002",
+      "suite": "Harness Contracts",
+      "name": "defineContract populates contracts",
+      "category": "harness_contracts",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hc_003",
+      "suite": "Harness Contracts",
+      "name": "validateSpawn returns structured result",
+      "category": "harness_contracts",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hl_001",
+      "suite": "Harness Lifecycle",
+      "name": "SelfHealingEngine exports global instance",
+      "category": "harness_lifecycle",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hl_002",
+      "suite": "Harness Lifecycle",
+      "name": "SelfHealingEngine has healing states",
+      "category": "harness_lifecycle",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hl_003",
+      "suite": "Harness Lifecycle",
+      "name": "HealthMonitor creates and maintains history",
+      "category": "harness_lifecycle",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hl_004",
+      "suite": "Harness Lifecycle",
+      "name": "ContextCompactor creates via getter",
+      "category": "harness_lifecycle",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hl_005",
+      "suite": "Harness Lifecycle",
+      "name": "ContextCompactor compact returns structured result",
+      "category": "harness_lifecycle",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hl_006",
+      "suite": "Harness Lifecycle",
+      "name": "SelfHealingEngine ingestSignal accepts tool error signals",
+      "category": "harness_lifecycle",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "hl_007",
+      "suite": "Harness Lifecycle",
+      "name": "harness-lifecycle defaults to maxConsecutiveFailures=5",
+      "category": "harness_lifecycle",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "cond_001",
+      "suite": "WorkflowEngine Condition Tests",
+      "name": "Condition true executes thenActions",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "cond_002",
+      "suite": "WorkflowEngine Condition Tests",
+      "name": "Condition false executes elseActions",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "cond_003",
+      "suite": "WorkflowEngine Condition Tests",
+      "name": "Expression true returns branch=then",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "cond_004",
+      "suite": "WorkflowEngine Condition Tests",
+      "name": "AND condition passes when both true",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "cond_005",
+      "suite": "WorkflowEngine Condition Tests",
+      "name": "OR condition passes when one true",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "loop_001",
+      "suite": "WorkflowEngine Loop Tests",
+      "name": "Loop iterates maxIterations times",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "loop_002",
+      "suite": "WorkflowEngine Loop Tests",
+      "name": "Loop breaks on breakCondition",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "loop_003",
+      "suite": "WorkflowEngine Loop Tests",
+      "name": "Default maxIterations caps at 10",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "loop_004",
+      "suite": "WorkflowEngine Loop Tests",
+      "name": "Loop results collected as array",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "loop_005",
+      "suite": "WorkflowEngine Loop Tests",
+      "name": "Minimal loop returns loop=true",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "evo_001",
+      "suite": "EvolutionCoordinator Tests",
+      "name": "sendUserFeedback returns a UUID",
+      "category": "evolution",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "evo_002",
+      "suite": "EvolutionCoordinator Tests",
+      "name": "sendSystemFeedback returns a UUID",
+      "category": "evolution",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "evo_003",
+      "suite": "EvolutionCoordinator Tests",
+      "name": "Stats track feedbacksReceived",
+      "category": "evolution",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "evo_004",
+      "suite": "EvolutionCoordinator Tests",
+      "name": "getFeedbackHistory respects limit",
+      "category": "evolution",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "evo_005",
+      "suite": "EvolutionCoordinator Tests",
+      "name": "Type filter works for user vs system",
+      "category": "evolution",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "evo_006",
+      "suite": "EvolutionCoordinator Tests",
+      "name": "Detects metric degradations",
+      "category": "evolution",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "evo_007",
+      "suite": "EvolutionCoordinator Tests",
+      "name": "autoEvolve=false suppresses evolution",
+      "category": "evolution",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "evo_008",
+      "suite": "EvolutionCoordinator Tests",
+      "name": "Emits feedback:received event",
+      "category": "evolution",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tpl_001",
+      "suite": "Template Condition & Loop Tests",
+      "name": "batch_process template is registered",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tpl_002",
+      "suite": "Template Condition & Loop Tests",
+      "name": "conditional_approval template is registered",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tpl_003",
+      "suite": "Template Condition & Loop Tests",
+      "name": "Keyword matching for batch_process",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tpl_004",
+      "suite": "Template Condition & Loop Tests",
+      "name": "Keyword matching for conditional_approval",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tpl_005",
+      "suite": "Template Condition & Loop Tests",
+      "name": "buildTaskFlowGoal returns valid string",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tpl_006",
+      "suite": "Template Condition & Loop Tests",
+      "name": "createFlowFromTemplate returns goal and metadata",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "tpl_007",
+      "suite": "Template Condition & Loop Tests",
+      "name": "validateTemplates returns valid",
+      "category": "workflow",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "mfo_001",
+      "suite": "Multi-Format Output Skills",
+      "name": "diagram-generator skill exists",
+      "category": "skill_validate",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "mfo_002",
+      "suite": "Multi-Format Output Skills",
+      "name": "diagram-generator has valid frontmatter",
+      "category": "skill_validate",
+      "passed": "\"1.0.0\"",
+      "error": null
+    },
+    {
+      "id": "mfo_003",
+      "suite": "Multi-Format Output Skills",
+      "name": "diagram-generator mentions Mermaid",
+      "category": "skill_validate",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "mfo_004",
+      "suite": "Multi-Format Output Skills",
+      "name": "html-generator skill exists",
+      "category": "skill_validate",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "mfo_005",
+      "suite": "Multi-Format Output Skills",
+      "name": "html-generator has valid frontmatter",
+      "category": "skill_validate",
+      "passed": "\"1.0.0\"",
+      "error": null
+    },
+    {
+      "id": "mfo_006",
+      "suite": "Multi-Format Output Skills",
+      "name": "html-generator describes standalone HTML output",
+      "category": "skill_validate",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "mfo_007",
+      "suite": "Multi-Format Output Skills",
+      "name": "chart-generator skill exists",
+      "category": "skill_validate",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "mfo_008",
+      "suite": "Multi-Format Output Skills",
+      "name": "chart-generator has valid frontmatter",
+      "category": "skill_validate",
+      "passed": "\"1.0.0\"",
+      "error": null
+    },
+    {
+      "id": "mfo_009",
+      "suite": "Multi-Format Output Skills",
+      "name": "chart-generator covers ECharts or Chart.js",
+      "category": "skill_validate",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "mfo_010",
+      "suite": "Multi-Format Output Skills",
+      "name": "All three new skills have metadata.crabpaw",
+      "category": "skill_validate",
+      "passed": true,
+      "error": null
+    },
+    {
+      "id": "mfo_011",
+      "suite": "Multi-Format Output Skills",
+      "name": "Existing skills still intact after new additions",
+      "category": "regression",
+      "passed": true,
+      "error": null
+    }
+  ]
+}

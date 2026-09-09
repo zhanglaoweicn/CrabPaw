@@ -1,0 +1,75 @@
+﻿name: CrabPaw CI
+
+on:
+  push:
+    branches: [main, develop, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: ['18', '20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm ci
+      - run: npm run lint
+      # 2026-09-03 P0 治理编码化: 层契约闸门(冻结存量/禁止增量) + 结构性事实校验
+      - run: npm run layer:check
+      - run: npm run facts:check
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        node-version: ['18', '20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm ci
+      - run: npm test -- --coverage
+      - uses: actions/upload-artifact@v4
+        if: matrix.node-version == '20'
+        with:
+          name: coverage
+          path: coverage/
+
+  gui-test:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # gui 的 npm ci 会触发 electron 包 postinstall 下载二进制(~100MB)——
+      # vitest/tsc 不需要它，跳过以加速
+      - run: npm ci
+        working-directory: gui
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npx tsc --noEmit
+        working-directory: gui
+      - run: npm test
+        working-directory: gui
+
+  eval:
+    runs-on: ubuntu-latest
+    needs: [test, gui-test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run eval
+      # 对比固定基线 v3（fresh checkout 无 latest.json，用人工评审的基线做回归参照）
+      - run: npm run eval:regression -- --baseline v3
