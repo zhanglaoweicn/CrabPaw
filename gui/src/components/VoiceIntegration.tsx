@@ -71,11 +71,14 @@ function readTTSVol(): number {
 export interface VoiceIntegrationProps {
   replyEnabled: boolean
   ttsPlaying: boolean
-  sendMessage: (text: string) => void
+  /** 2026-09-17: voiceContext=实时会话最近几轮话轮(委托时接力给主链路) */
+  sendMessage: (text: string, files?: { path: string; name: string }[], voiceContext?: Array<{ text: string }>) => void
   continuousMode?: boolean
   wakeWordEnabled?: boolean
   // 2026-08-01: ASR provider（aliyun/tencent/xunfei/volcengine），此前硬编码 volcengine
   asrProvider?: string
+  /** 2026-09-17: 语音对话通道——realtime=豆包全双工端到端(经 /voice/realtime) */
+  dialogChannel?: 'classic' | 'realtime'
   onStateChange?: (state: { sessionActive: boolean }) => void
   /** P5.5: 全静默 — muted 时输入输出全关（PTT/连续对话/触摸均失效，会话停止） */
   muted?: boolean
@@ -93,6 +96,7 @@ export function VoiceIntegration({
   continuousMode = false,
   wakeWordEnabled = false,
   asrProvider,
+  dialogChannel = 'classic',
   onStateChange,
   muted = false,
   pttOnly = false,
@@ -127,9 +131,10 @@ export function VoiceIntegration({
   )
   const getSendMsg = useCallback(() => {
     const original = sendMessageRef.current
-    return (text: string) => {
+    return (text: string, voiceContext?: Array<{ text: string }>) => {
       if (interceptLocalVoiceCommand(text)) return
-      original(text)
+      // 2026-09-17: 实时通道委托携带语音上下文接力给主链路
+      original(text, undefined, voiceContext)
     }
   }, [])
 
@@ -141,6 +146,8 @@ export function VoiceIntegration({
   const session = useVoiceSession({
     continuous: effectiveContinuous,
     asrProvider,
+    // 2026-09-17: 对话通道透传（realtime=豆包全双工端到端）
+    dialogChannel,
     onVolume: useCallback((vol: number) => {
       onFrameRef.current(vol)
     }, []),
@@ -169,6 +176,22 @@ export function VoiceIntegration({
     getSendMessage: getSendMsg,
   })
 
+  // ── 2026-09-17: 实时通道全局桥（window.__ 两族划分沿用既有约定）──
+  // __rtVoiceSpeak: 任务回复终稿回喂实时模型口播（VoiceShell onReplyFinal 调用）
+  // __rtVoiceStop: 任意入口打断模型当前播报（唤醒/卡片/停止按钮复用）
+  const rtSessionRef = useRef(session)
+  rtSessionRef.current = session
+  useEffect(() => {
+    if (dialogChannel !== 'realtime') return
+    const w = window as any
+    w.__rtVoiceSpeak = (text: string) => rtSessionRef.current.rtSpeak?.(text)
+    w.__rtVoiceStop = () => rtSessionRef.current.rtInterrupt?.()
+    return () => {
+      if (w.__rtVoiceSpeak) delete w.__rtVoiceSpeak
+      if (w.__rtVoiceStop) delete w.__rtVoiceStop
+    }
+  }, [dialogChannel])
+
   // ── Barge-in 回调 ──
   // 2026-08-08(音量忽大忽小修复): duck/unduck 同时实时应用到当前播放的 audio 元素
   // (applyDuckVolume 带回溯+平滑)——旧实现只置全局标记,下一句 new Audio() 才生效,
@@ -186,6 +209,8 @@ export function VoiceIntegration({
     },
     stopTTS: async () => {
       try { if ((window as any).__voiceInterruptTTS) await (window as any).__voiceInterruptTTS(true) } catch (e) { console.warn('[Voice] interruptTTS error:', e) }
+      // 2026-09-17: 实时通道——同步打断模型播报(classic 下 no-op)
+      try { (window as any).__rtVoiceStop?.() } catch (e) { console.warn('[Voice] rtVoiceStop error:', e) }
     },
     resumeTTSIfNoSpeech: () => {
       updateState({ ttsDucked: false })
@@ -242,6 +267,9 @@ export function VoiceIntegration({
   // session 是每渲染新对象,键盘 effect 依赖 [] 用 ref 保最新。
   const sessionRef = useRef(session)
   sessionRef.current = session
+  // 2026-09-17: 实时通道标记——键盘 effect 依赖 [],通道用 ref 保最新
+  const dialogChannelRef = useRef(dialogChannel)
+  dialogChannelRef.current = dialogChannel
   // P5.5 全静默: muted 守卫（A 语义 — 静音时 PTT/触摸/连续对话全部失效）
   const mutedRef = useRef(muted)
   mutedRef.current = muted
@@ -279,6 +307,19 @@ export function VoiceIntegration({
         try { onUnmuteRequest?.() } catch (err: any) { console.warn('[Voice] 解除静音失败(仍继续 PTT):', err?.message || err) }
       }
       pttStartedRef.current = true
+      // ── 2026-09-17: 实时通道分支——session 上行即实时模型的话筒,无需 PTT 独立管线。
+      // 按住=继续说(打断模型当前播报), 松手=强制判停(up 分支 rtCommit) ──
+      if (dialogChannelRef.current === 'realtime') {
+        try { (window as any).__rtVoiceStop?.() } catch (err: any) { console.warn('[Voice] rtVoiceStop 失败:', err?.message || err) }
+        // 媒体挂起中(音乐播放)按空格 → 先恢复采集+解除静音, 让模型听到 PTT 语音
+        if (sessionRef.current.mediaActive) {
+          sessionRef.current.resumeAfterMedia()
+        }
+        if (!sessionRef.current.isActive) {
+          sessionRef.current.startSession().catch(e => console.warn('[Voice] PTT(realtime) 启动会话失败:', e))
+        }
+        return
+      }
       // B3/H4: 空格 PTT 与常开会话是独立双管线(独立 getUserMedia+WS)。
       // 按住时先暂停常开会话采集——否则常开会话 auto-send 的 pttHolding 守卫
       // 读 session.pttHolding 恒 false,会在静默 800ms 后自动发送同句话,
@@ -286,6 +327,7 @@ export function VoiceIntegration({
       try {
         if ((window as any).__ttsActive && typeof (window as any).__voiceInterruptTTS === 'function') {
           ;(window as any).__voiceInterruptTTS(true)
+          ;(window as any).__rtVoiceStop?.()
         }
       } catch (err: any) { console.warn('[Voice] PTT 打断 TTS 失败:', err?.message || err) }
       // 2026-08-07(三方抢占修复): 弃用 suspendForTTS(它保留 session mic 流 +
@@ -313,6 +355,11 @@ export function VoiceIntegration({
       e.preventDefault()
       if (!started && mutedRef.current) return
       pttStartedRef.current = false
+      // ── 2026-09-17: 实时通道分支——松手=强制判停, 模型接话(无独立 PTT 管线需收尾) ──
+      if (dialogChannelRef.current === 'realtime') {
+        sessionRef.current.rtCommit()
+        return
+      }
       // 2026-08-07(三方抢占修复): 松手顺序——先释放 PTT 自己的麦克风
       // (stopRecording 同步 cleanup),再重建 session 采集,避免 restore 的
       // getUserMedia 与 PTT 采集并发占麦;最后重连 ASR WS
@@ -322,6 +369,12 @@ export function VoiceIntegration({
     }
     // 失焦兜底：按住空格时切窗口（keyup 丢失）→ 取消录音 + 恢复会话，不误发
     const onBlur = () => {
+      // 2026-09-17: 实时通道——切窗时对已开始的按住做判停收尾(不误发, 模型自行决定)
+      if (dialogChannelRef.current === 'realtime') {
+        if (pttStartedRef.current) sessionRef.current.rtCommit()
+        pttStartedRef.current = false
+        return
+      }
       pttCancelRef.current()
       sessionRef.current.restoreMicAfterPtt()
       sessionRef.current.resumeSession()
@@ -356,6 +409,7 @@ export function VoiceIntegration({
       try {
         if ((window as any).__ttsActive && typeof (window as any).__voiceInterruptTTS === 'function') {
           ;(window as any).__voiceInterruptTTS(true)
+          ;(window as any).__rtVoiceStop?.()
         }
       } catch (err: any) { console.warn('[Voice] 唤醒打断 TTS 失败:', err?.message || err) }
       // 2026-08-07: 防御性 .catch——startSession 内部已消化 rejection
@@ -390,6 +444,7 @@ export function VoiceIntegration({
       try {
         if ((window as any).__ttsActive && typeof (window as any).__voiceInterruptTTS === 'function') {
           ;(window as any).__voiceInterruptTTS(true)
+          ;(window as any).__rtVoiceStop?.()
         }
       } catch (err: any) { console.warn('[Voice] 打断 TTS 失败:', err?.message || err) }
       if (mutedRef.current) return

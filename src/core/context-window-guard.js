@@ -4,9 +4,13 @@ const CONTEXT_WINDOW_HARD_MIN_TOKENS = 4000;
 const CONTEXT_WINDOW_WARN_BELOW_TOKENS = 8000;
 const CONTEXT_WINDOW_HARD_MIN_RATIO = 0.1;
 const CONTEXT_WINDOW_WARN_BELOW_RATIO = 0.2;
+// 未识别模型的兜底窗口。此前直接复用 WARN_BELOW(8000)——生产模型一旦不在表内
+// (实测 deepseek-flash)窗口被按 8K 计算,压缩器跟假阈值搏斗,上下文"溢出 1022%"
+// 实为口径错误。2026 起主流模型窗口 ≥32K,兜底取 32K(保守值,宁小勿溢出真窗口)。
+const CONTEXT_WINDOW_FALLBACK_TOKENS = 32768;
 
 const DOMESTIC_MODEL_CONTEXT = {
-  deepseek: { 'deepseek-v4-pro': 128000, 'deepseek-v4-flash': 65536, 'deepseek-v4-flash-vision-exp': 65536, 'deepseek-chat': 128000, 'deepseek-reasoner': 128000 },
+  deepseek: { 'deepseek-v4-pro': 128000, 'deepseek-v4-flash': 65536, 'deepseek-v4-flash-vision-exp': 65536, 'deepseek-chat': 128000, 'deepseek-reasoner': 128000, 'deepseek-flash': 128000, 'deepseek-v3': 128000, 'deepseek-v3.1': 128000, 'deepseek-v3.2': 128000 },
   qwen: { 'qwen-max': 32768, 'qwen-plus': 131072, 'qwen-turbo': 131072, 'qwen-long': 1000000 },
   glm: { 'glm-4': 128000, 'glm-4-flash': 128000, 'glm-4-plus': 128000, 'glm-4-long': 1000000 },
   moonshot: { 'moonshot-v1-8k': 8192, 'moonshot-v1-32k': 32768, 'moonshot-v1-128k': 128000 },
@@ -32,6 +36,9 @@ const MODEL_PREFIX_RULES = [
   { prefix: 'o3-', tokens: 200000 },
   { prefix: 'deepseek-r', tokens: 128000 },
   { prefix: 'deepseek-chat', tokens: 128000 },
+  // deepseek 家族兜底(2026-09-18): 生产模型 deepseek-flash 不带 v/chat/r 字样,
+  // 此前漏配 → 落 8K 兜底 → 压缩器空转(实测 83612 tokens 阈值 5600 的来源)
+  { prefix: 'deepseek-', tokens: 128000 },
   { prefix: 'qwen-long', tokens: 1000000 },
   { prefix: 'qwen-', tokens: 131072 },
   { prefix: 'glm-4-long', tokens: 1000000 },
@@ -73,7 +80,7 @@ function resolveContextWindowInfo(params) {
   })();
 
   const fromModel = normalizePositiveInt(modelContextTokens) ?? normalizePositiveInt(modelContextWindow);
-  const fallback = normalizePositiveInt(defaultTokens) ?? CONTEXT_WINDOW_WARN_BELOW_TOKENS;
+  const fallback = normalizePositiveInt(defaultTokens) ?? CONTEXT_WINDOW_FALLBACK_TOKENS;
 
   if (fromModelMap) {
     return { tokens: fromModelMap, source: 'modelMap' };
@@ -315,5 +322,6 @@ module.exports = {
   resolveContextWindowGuardThresholds,
   CONTEXT_WINDOW_HARD_MIN_TOKENS,
   CONTEXT_WINDOW_WARN_BELOW_TOKENS,
+  CONTEXT_WINDOW_FALLBACK_TOKENS,
   DOMESTIC_MODEL_CONTEXT,
 };

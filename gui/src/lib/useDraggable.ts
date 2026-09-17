@@ -35,6 +35,8 @@ export function useDraggable({
 }: UseDraggableOptions) {
   const [dragging, setDragging] = useState(false)
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null)
+  // 2026-09-17: 卡片"无偏移基点"(视口坐标)——拖动开始时记录, 钳制按实际边缘计算
+  const dragBaseRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   /** 本次 pointerdown 后是否已越过拖拽阈值(移动>3px)——用于抑制 click */
   const movedRef = useRef(false)
   const suppressClickRef = useRef(false)
@@ -47,11 +49,21 @@ export function useDraggable({
     if (!dragOnButtons && t.closest(ignoreSelector)) return
     movedRef.current = false
     suppressClickRef.current = false
+    // 2026-09-17 修复(对话卡拖下被底边遮盖): 记录卡片"无偏移基点"——旧钳制公式
+    // 假设卡片原位在屏幕左上角(offset 即视口坐标), 但对话卡等原位在下半屏,
+    // 下拖时 y 钳到 vh-40 只限制顶部位置, 卡身大半越出底边被界面遮盖。
+    // 基点 = 当前 rect 减去已生效偏移, 钳制改按"卡片实际视口边缘"计算。
+    const rect = panelRef.current?.getBoundingClientRect()
+    const curX = offset?.x ?? 0
+    const curY = offset?.y ?? 0
+    dragBaseRef.current = rect
+      ? { x: rect.left - curX, y: rect.top - curY }
+      : { x: 0, y: 0 }
     dragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
-      origX: offset?.x ?? 0,
-      origY: offset?.y ?? 0,
+      origX: curX,
+      origY: curY,
     }
     setDragging(true)
     // 2026-08-31 修复(点击展开没反应): 不在 pointerdown 立即 setPointerCapture——
@@ -71,14 +83,20 @@ export function useDraggable({
       suppressClickRef.current = true
       e.currentTarget.setPointerCapture?.(e.pointerId)
     }
-    // 面板尺寸感知 clamp: 左/上界 8-w 保证留 8px 可触及, 右/下界 vw-40（镜像 geometry.ts 8-w）
+    // 视口钳制(按卡片实际边缘): 上/左界留 8px 可触及, 下/右界保留 48px 可见条
+    // ——卡片无论原位在哪、拖到哪, 至少 48px 高/宽留在视口内, 不会被界面遮盖。
+    const base = dragBaseRef.current
+    const w = panelRef.current?.offsetWidth ?? window.innerWidth - 32
+    const h = panelRef.current?.offsetHeight ?? window.innerHeight - 32
     const clampX = (v: number) => {
-      const w = panelRef.current?.offsetWidth ?? window.innerWidth - 32
-      return Math.max(8 - w, Math.min(v, window.innerWidth - 40))
+      const minX = 8 - base.x - w          // 卡右缘贴视口左界时仍留 8px
+      const maxX = window.innerWidth - 48 - base.x // 卡右缘不越出视口右界-48
+      return Math.max(Math.min(minX, maxX), Math.min(v, maxX))
     }
     const clampY = (v: number) => {
-      const h = panelRef.current?.offsetHeight ?? window.innerHeight - 32
-      return Math.max(8 - h, Math.min(v, window.innerHeight - 40))
+      const minY = 8 - base.y - h          // 卡底缘贴视口顶界时仍留 8px
+      const maxY = window.innerHeight - 48 - base.y // 卡底缘不越出视口底界-48
+      return Math.max(Math.min(minY, maxY), Math.min(v, maxY))
     }
     onOffsetChange?.({ x: clampX(d.origX + e.clientX - d.startX), y: clampY(d.origY + e.clientY - d.startY) })
   }

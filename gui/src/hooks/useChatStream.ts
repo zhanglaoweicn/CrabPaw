@@ -22,6 +22,8 @@ export interface GeneratedFile {
 
 export interface ChatStreamRequest {
   message: string
+  /** 2026-09-17: 实时语音上下文接力——委托任务时携带实时会话最近几轮用户话轮 */
+  voiceContext?: Array<{ text: string }>
   files?: Array<{ path: string; name: string; type?: string; size?: number }>
   userId: string
   conversationId: string | null | undefined
@@ -198,6 +200,7 @@ export function useChatStream() {
           message: req.message,
           stream: true,
           files: req.files && req.files.length > 0 ? req.files : undefined,
+          voiceContext: req.voiceContext,
           userId: req.userId,
           conversationId: req.conversationId,
           projectId: req.projectId ?? undefined,
@@ -229,6 +232,7 @@ export function useChatStream() {
               message: req.message,
               stream: true,
               files: req.files && req.files.length > 0 ? req.files : undefined,
+              voiceContext: req.voiceContext,
               userId: req.userId,
               conversationId: req.conversationId,
               projectId: req.projectId ?? undefined,

@@ -1829,9 +1829,9 @@ ipcMain.handle('api:credentials', async () => {
 // 主进程代理(零 token 接触面);SSE/WS/上传端点无法走自定义 scheme,仍注入 token 查询参数。
 // 不能沿用 api:proxy 的宽白名单(/sessions /memory /logs 等敏感端点禁止经此通道)。
 // 仅放行渲染层确实需要的: SSE(/chat /events)、音频播放(/api/voice/tts /api/voice/audio)、
-// WS(/voice/cloud /scene)、上传(/upload /skills/install/zip)、下载(/api/profiles /api/backup/download)。
+// WS(/voice/cloud /voice/realtime /scene)、上传(/upload /skills/install/zip)、下载(/api/profiles /api/backup/download)。
 const STREAM_URL_EXACT_ENDPOINTS = [
-  '/chat', '/events', '/voice/cloud', '/scene',
+  '/chat', '/events', '/voice/cloud', '/voice/realtime', '/scene',
   '/upload', '/upload/base64', '/skills/install/zip',
   '/api/backup/download', '/api/proxy-audio',
 ]

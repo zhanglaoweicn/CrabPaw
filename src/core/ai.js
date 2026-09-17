@@ -4,6 +4,10 @@ const path = require('path');
 // 模块级共享会让 A 用户的验证门触发强制 B 用户 tool_choice='required'(跨请求竞态)。
 const { WORKSPACE_DIR } = require('./config');
 const { memoryManager, addMessage: unifiedAddMessage } = require('./unified-memory');
+ // 2026-09-18: 注入提示剥离器(会话膨胀治理——历史/持久化两个入口共用)
+ const { stripInjectedHints } = require('./hint-sanitizer');
+ // 2026-09-18: 历史长内容压缩器(会话膨胀治理层1——装配侧存量瘦身)
+ const { compactHistoryMessages } = require('./history-compactor');
 const { registry, addConfirmedPattern } = require('../tools');
 const { loadSkills, buildSkillsPrompt, buildSkillsPromptScoped } = require('./skills');
 const { smartExtractArguments, substituteArguments } = require('../skills/argument-substitution');
@@ -1203,9 +1207,23 @@ async function prepareChatContext(config, userId, message, options = {}) {
  // stable→历史→(volatile)→user 中, 头部字节稳定即大段命中。
  const volatileContent = volatileParts.some(Boolean) ? volatileParts.filter(Boolean).join('\n') : null;
 
+ // 2026-09-18: 历史消息装配三连处理(会话膨胀治理)——
+ //   1) stripInjectedHints 剥离注入脚手架(语音模式/taskflow/专家人设等, 只对当轮生效)
+ //   2) compactHistoryMessages 长内容落档为预览+引用(存量膨胀立即瘦身, 层1装配侧)
+ //   3) 保留 id —— 压缩写回 replaceWithSummary 靠它删除被替换的历史行(P2-1 此前
+ //      因映射丢 id 静默失效, 每轮压缩写回从未真正落库)
+ const _assembledHistory = userHistory.map(m => ({
+   role: m.role,
+   id: m.id,
+   content: m.role === 'user' ? stripInjectedHints(m.content) : m.content,
+ }));
+ const _compacted = compactHistoryMessages(_assembledHistory);
+ if (_compacted.compactedCount > 0) {
+   console.log(`🗜️ [历史装配] ${_compacted.compactedCount} 条长内容历史已落档为预览+引用`);
+ }
  const messages = [
  ...systemMessages,
- ...userHistory.map(m => ({ role: m.role, content: m.content })),
+ ..._compacted.messages,
  ...(volatileContent ? [{ role: 'system', content: volatileContent }] : []),
  { role: 'user', content: enhancedMessage }
  ];
@@ -1229,9 +1247,14 @@ async function prepareChatContext(config, userId, message, options = {}) {
 
  // P2-1(2026-08-25) 压缩写回摘要：压缩替换了中段历史时同步落库（删除被替换消息+写摘要行），
  // 下一轮从「原始历史重建」变为「摘要+尾部重建」——结构性消除每轮压缩振荡。
+ // 2026-09-18: 写回成功后使历史缓存失效——否则 60s TTL 内仍装配已删除的旧行,
+ // 摘要行也不可见,写回等于白做(实测 voice_shell_user 会话的教训)
  if (compressPersist && compressPersist.removedIds && compressPersist.removedIds.length > 0) {
    try {
-     await history.replaceWithSummary(userId, typeof sessionId === 'string' ? sessionId : null, compressPersist);
+     const writtenBack = await history.replaceWithSummary(userId, typeof sessionId === 'string' ? sessionId : null, compressPersist);
+     // 传裸 userId:invalidateHistory 精确删 userId 键 + 前缀清扫 userId:* 复合键,
+     // 会话键与无会话键两个缓存都持有被删行,须一并失效
+     if (writtenBack) contextCache.invalidateHistory(userId);
    } catch (e) { console.warn('[history] 压缩摘要写回失败:', e.message); }
  }
  // 主动压缩提示：当上下文使用率 > 80% 时，提示模型主动总结
@@ -1650,7 +1673,8 @@ async function chatImpl(config, skills, userId, message, options = {}) {
  }
 
  // silent 内部任务不写主对话历史（防提取指令污染，2026-08-17 根因修复）
- if (!silent) unifiedAddMessage(userId, 'user', message);
+ // 2026-09-18: 持久化前剥离注入提示——历史只存用户原话(会话膨胀治理)
+ if (!silent) unifiedAddMessage(userId, 'user', stripInjectedHints(message));
  
  const toolDefStart = Date.now();
  const currentChannel = Array.isArray(config.chatChannel) ? config.chatChannel[0] : (config.chatChannel || 'none');

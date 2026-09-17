@@ -759,9 +759,9 @@ TOOL_CONTRACTS.ShowMemoryGraph = {
 // v2 ShowPersonCard/ShowWorldCup/PushFocusBanner(panels-v2-tool.js)为事实标准。
 // 2026-08-19: 业务面板退役——enum 删 open/close_business_panel（专家/数据迁管理舱 data tab）。
 TOOL_CONTRACTS.ControlUI = {
-  description: '控制 CrabPaw 界面元素(打开/关闭面板、切换 tab、新对话)。当用户明确要求打开/关闭界面时调用,不要在普通问答中主动打开任何界面。',
+  description: '控制 CrabPaw 界面元素(打开/关闭面板、切换 tab、新对话)。当用户明确要求打开/关闭界面时调用,不要在普通问答中主动打开任何界面。command 必须从枚举逐字选取: 关闭文件/文档生成面板用 close_doc; 关闭文章/台风/天气等场景卡用 close_scene_card; 关闭任务面板用 close_task_panel; 关闭天气面板用 close_weather; 关闭热点面板用 close_hotspot; 关闭音乐用 close_music——禁止自造枚举外的命令名。',
   whenNotToUse: ['普通问答中不得主动开关界面', '用户未提及界面操作时'],
-  schema: {"type":"object","properties":{"command":{"type":"string","enum":["open_cockpit","close_cockpit","open_search","open_doc","open_music","close_music","open_hotspot","close_hotspot","open_weather","close_weather","open_task_panel","close_task_panel","close_scene_card","new_conversation"],"description":"界面操作"},"tab":{"type":"string","description":"面板目标 tab"},"query":{"type":"string","description":"open_search 搜索词"},"reason":{"type":"string"}},"required":["command"],"additionalProperties":false},
+  schema: {"type":"object","properties":{"command":{"type":"string","enum":["open_cockpit","close_cockpit","open_search","open_doc","open_music","close_music","open_hotspot","close_hotspot","open_weather","close_weather","open_task_panel","close_task_panel","close_scene_card","close_doc","new_conversation"],"description":"界面操作(必须逐字取自枚举, 禁止自造)"},"tab":{"type":"string","description":"面板目标 tab"},"query":{"type":"string","description":"open_search 搜索词"},"reason":{"type":"string"}},"required":["command"],"additionalProperties":false},
   maxTimeout: 3000, riskLevel: "low", validate: null
 };
 // 2026-08-18 清理: VoiceRetire 契约随 v1 工具(voice_retire)注销而删除——

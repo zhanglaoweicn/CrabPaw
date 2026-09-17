@@ -82,6 +82,11 @@ export function executeUiCommand({ command, tab, query }: UiCommand): void {
     case 'close_task_panel':
       executeCommand('taskPanel', 'setVisible', false)
       break
+    // 2026-09-18: 关闭文件/文档生成面板(FileGenPanel)——此前无关闭命令,
+    // 模型只能看错误降级(用户实测"说关了卡片还在"的根因)
+    case 'close_doc':
+      executeCommand('filePanel', 'setVisible', false)
+      break
     case 'close_scene_card':
       dispatch('crabpaw:close-scene-card')
       break

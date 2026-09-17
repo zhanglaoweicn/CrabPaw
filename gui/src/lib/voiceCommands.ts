@@ -177,6 +177,63 @@ const VOICE_COMMANDS: VoiceCommand[] = [
     description: '打开记忆页',
     sound: 'button-click',
   },
+  // ── 2026-09-17: 本机瞬时问答(实时通道专用)——"几点了/几号/星期几"本机直接
+  // 作答(0 延迟), 不再委托模型/主链路等数秒。守卫限定实时通道(有 __rtVoiceSpeak
+  // 桥才拦截); classic 通道守卫失败按不命中处理, 走既有主链路回答。
+  {
+    id: 'local-time',
+    // 2026-09-17 实测补宽: "我问个时间"这类口语说法此前未命中, 漏给了兜底委托
+    patterns: [
+      /^(现在)?几点(了|啦|钟)?[?？]?$/, /^现在(的)?时间$/, /^什么时间(了|啦)?[?？]?$/,
+      /^告诉我(现在)?几点(了|啦|钟)?[?？]?$/, /^(我问|问|问下|问一下)(个|下)?时间[?？]?$/,
+      /^(现在)?时间$/, /^看看(现在)?几点(了|啦)?[?？]?$/,
+    ],
+    guard: () => typeof (window as any).__rtVoiceSpeak === 'function',
+    action: () => {
+      const now = new Date()
+      const m = String(now.getMinutes()).padStart(2, '0')
+      const w = window as any
+      w.__rtVoiceStop?.()
+      w.__rtVoiceSpeak?.(`现在是${now.getHours()}点${m}分。`)
+      console.log(`[VoiceCmd] 本地时间作答: ${now.getHours()}:${m}`)
+    },
+    description: '本地报时(实时通道)',
+  },
+  {
+    id: 'local-date',
+    patterns: [/^今天几号(了|啊|呀)?[?？]?$/, /^今天(的)?日期$/, /^今天星期几[?？]?$/, /^今天周几[?？]?$/],
+    guard: () => typeof (window as any).__rtVoiceSpeak === 'function',
+    action: () => {
+      const now = new Date()
+      const weekdays = ['日', '一', '二', '三', '四', '五', '六']
+      const w = window as any
+      w.__rtVoiceStop?.()
+      w.__rtVoiceSpeak?.(`今天是${now.getMonth() + 1}月${now.getDate()}日，星期${weekdays[now.getDay()]}。`)
+      console.log(`[VoiceCmd] 本地日期作答: ${now.getMonth() + 1}/${now.getDate()}`)
+    },
+    description: '本地日期作答(实时通道)',
+  },
+  // ── 2026-09-17: 本地关卡命令(实时通道)——"关闭文件/文章/台风/天气卡片"秒关,
+  // 不再委托 LLM(此前 ControlUI 契约三连失败→报错)。守卫同上限定实时通道。
+  {
+    id: 'local-close-card',
+    patterns: [
+      // 2026-09-18 补宽: "关闭文件""关闭这个卡片""把卡片撤掉"等模糊说法也秒关
+      /^关闭(这个|那个|一下)?(文件|文章|文档|台风|天气|热点|新闻|日程|知识库)?(卡片|面板|文件|窗口)?[?。！]?$/,
+      /^(把|将)(这个|那个|文件|文章|文档|台风|天气|热点|新闻)?(卡片|面板|文件)(关了|关掉|关闭|撤掉|清掉)[?。！]?$/,
+      /^(文件|文章|文档|台风|天气)?(卡片|面板)(关了|撤掉|清掉)[?。！]?$/,
+    ],
+    guard: () => typeof (window as any).__rtCloseCard === 'function' && typeof (window as any).__rtVoiceSpeak === 'function',
+    action: () => {
+      const w = window as any
+      w.__rtVoiceStop?.()
+      // 关最上层卡片(刚弹出的卡即最上层, 语义等价"关闭那张卡")
+      const result = w.__rtCloseCard()
+      w.__rtVoiceSpeak?.(result)
+      console.log(`[VoiceCmd] 本地关卡: ${result}`)
+    },
+    description: '本地关闭场景卡(实时通道)',
+  },
 ]
 
 // ─── 拦截入口 ───────────────────────────────────────────

@@ -199,6 +199,10 @@ const SettingsComponent = (props: SettingsProps, ref: React.Ref<SettingsHandle>)
     aliyunApiKey: "",
     aliyunModel: "fun-asr-realtime-2026-02-28",
     asrLang: "zh",
+    // 2026-09-17: 语音对话通道——classic=ASR+TTS 接力(缺省); realtime=豆包全双工端到端
+    dialogChannel: "classic",
+    // 2026-09-17: 实时通道模型音色(豆包精品音色, 与 TTS 音色相互独立)
+    realtimeVoice: "zh_female_vv_jupiter_bigtts",
   })
 
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([])
@@ -654,6 +658,8 @@ const SettingsComponent = (props: SettingsProps, ref: React.Ref<SettingsHandle>)
             aliyunApiKey: config.voice.aliyunApiKey || "",
             aliyunModel: config.voice.aliyunModel || "fun-asr-realtime-2026-02-28",
             asrLang: config.voice.asrLang || config.voice.lang || 'zh',
+            dialogChannel: config.voice.dialogChannel === 'realtime' ? 'realtime' : 'classic',
+            realtimeVoice: config.voice.realtimeVoice || "zh_female_vv_jupiter_bigtts",
           }))
         } else {
           console.log('🔊 未找到语音配置，使用默认值')

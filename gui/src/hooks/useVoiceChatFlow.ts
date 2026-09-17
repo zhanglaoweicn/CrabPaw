@@ -22,10 +22,20 @@ import { useVoiceState } from '../contexts/VoiceStateContext'
 import { useSse } from './useSSE'
 import { apiPost } from '../lib/api'
 
+export interface VoiceChatFlowOptions {
+  /** 2026-09-17: 语音对话通道——realtime 时跳过本地 TTS 管线, 回复终稿经 onReplyFinal 回喂实时模型口播 */
+  ttsMode?: 'classic' | 'realtime'
+  /** 2026-09-17: 回复流结束(或断线补投)时的终稿回调——realtime 通道喂 rtSpeak */
+  onReplyFinal?: (text: string) => void
+  /** 2026-09-17: realtime 首句流式口播——回复流里出现第一个完整句立即回喂(不等全文), 每轮最多一次 */
+  onReplySentence?: (sentence: string) => void
+}
+
 export function useVoiceChatFlow(
   voiceConfig: VoiceConfig,
   muted = false,
   onPhase?: (event: { phase: string; summary?: string; detail?: string; progress?: number }) => void,
+  options: VoiceChatFlowOptions = {},
 ) {
   const chatStream = useChatStream()
   const { state } = useVoiceState()
@@ -77,6 +87,15 @@ export function useVoiceChatFlow(
   const generationRef = useRef(0)
   const mutedRef = useRef(muted)
   mutedRef.current = muted
+  // 2026-09-17: 实时通道选项——ref 持有使 sendText 闭包免于依赖 options 对象身份
+  const ttsModeRef = useRef(options.ttsMode === 'realtime' ? 'realtime' : 'classic')
+  ttsModeRef.current = options.ttsMode === 'realtime' ? 'realtime' : 'classic'
+  const onReplyFinalRef = useRef(options.onReplyFinal)
+  onReplyFinalRef.current = options.onReplyFinal
+  // 2026-09-17: 首句流式口播——每轮最多一次, sendText 重置
+  const onReplySentenceRef = useRef(options.onReplySentence)
+  onReplySentenceRef.current = options.onReplySentence
+  const firstSentenceSpokenRef = useRef(false)
   // 2026-09-06 断线补投: 本轮开始时刻 + 流式已收文本同步镜像——
   // run:finished 补投判定用(事件晚于本轮开始 且 已渲染文本不含该回复 → 流没送到)
   const genStartedAtRef = useRef(0)
@@ -119,7 +138,8 @@ export function useVoiceChatFlow(
   }, [])
 
   // 2026-08-04: 支持附件——文本对话配套文件上传(后端 /chat files 字段,注入消息提示 LLM 读取)
-  const sendText = useCallback(async (text: string, files?: Array<{ path: string; name: string; type?: string; size?: number }>) => {
+  // 2026-09-17: 支持实时语音上下文接力——委托任务时携带实时会话最近几轮用户话轮
+  const sendText = useCallback(async (text: string, files?: Array<{ path: string; name: string; type?: string; size?: number }>, voiceContext?: Array<{ text: string }>) => {
     setAiText('')
     setPending(true)
     setReplyCompleted(false)
@@ -133,6 +153,8 @@ export function useVoiceChatFlow(
     // 2026-09-06 断线补投锚点: 本轮开始时刻(旧轮 run:finished 据此跳过)
     genStartedAtRef.current = Date.now()
     aiTextRef.current = ''
+    // 2026-09-17: 首句口播标记按轮重置
+    firstSentenceSpokenRef.current = false
 
     // 2026-08-13 P2-4: conversationId 打通——优先从后端创建 sess_* 会话
     // (消息按会话落库、历史按会话过滤);后端不可用时回退本地 voice-* id
@@ -174,6 +196,8 @@ export function useVoiceChatFlow(
         files: files && files.length > 0 ? files : undefined,
         userId: userIdRef.current,
         conversationId: convIdRef.current,
+        // 2026-09-17: 实时语音上下文接力(仅注入本轮 LLM 消息, 不改变界面/落库原貌)
+        voiceContext: voiceContext && voiceContext.length > 0 ? voiceContext : undefined,
       },
       {
         onStreamStart: (_info) => {
@@ -184,6 +208,8 @@ export function useVoiceChatFlow(
           // 非空 chunk 清除(onChunk), 10s 兜底定时器保留。
           // P2: muted 时跳过 TTS 合成/播放——消除静音切换瞬间的 TTS 闪播
           if (mutedRef.current) return
+          // 2026-09-17: realtime 通道无本地 TTS(模型自带嗓音)
+          if (ttsModeRef.current === 'realtime') return
           ;(window as any).__ttsStreamStarted = true
           const vc = voiceConfigRef.current
           if (vc.replyEnabled || vc.continuousMode) {
@@ -208,24 +234,35 @@ export function useVoiceChatFlow(
             setPending(false)
           }
           setAiText(accumulated)
+          // 2026-09-17: realtime 首句流式口播——第一个完整句一到立即回喂实时模型
+          // (不等全文完成, 任务+工具调用场景省 5-15s); 全文照常上屏
+          if (ttsModeRef.current === 'realtime' && !firstSentenceSpokenRef.current && onReplySentenceRef.current) {
+            const m = accumulated.match(/[。！？；]/)
+            if (m && m.index !== undefined && m.index >= 4) {
+              firstSentenceSpokenRef.current = true
+              try { onReplySentenceRef.current(accumulated.slice(0, m.index + 1)) } catch (e) { console.error('[shell] onReplySentence:', e) }
+            }
+          }
           try {
             // 2026-08-04 P1 修复:start 事件缺失时 TTS 完全静默——后端未发 start
             // 事件(chunk 直接到)时 sttsActive 恒 false,feed 静默 return。
             // 首 chunk 到达且未启动 → 惰性启动流式 TTS
-            if (!(window as any).__ttsStreamStarted) {
-              // P2: muted 时跳过惰性启动——消除静音切换瞬间的 TTS 闪播
-              if (mutedRef.current) return
-              ;(window as any).__ttsStreamStarted = true
-              const vc = voiceConfigRef.current
-              if ((vc.replyEnabled || vc.continuousMode) && accumulated && accumulated.trim().length > 0) {
-                try {
-                  beginStreamingTTS(vc, ttsOptions)
-                } catch (e) {
-                  console.error('[shell] 惰性 beginStreamingTTS:', e)
+            if (ttsModeRef.current !== 'realtime') {
+              if (!(window as any).__ttsStreamStarted) {
+                // P2: muted 时跳过惰性启动——消除静音切换瞬间的 TTS 闪播
+                if (mutedRef.current) return
+                ;(window as any).__ttsStreamStarted = true
+                const vc = voiceConfigRef.current
+                if ((vc.replyEnabled || vc.continuousMode) && accumulated && accumulated.trim().length > 0) {
+                  try {
+                    beginStreamingTTS(vc, ttsOptions)
+                  } catch (e) {
+                    console.error('[shell] 惰性 beginStreamingTTS:', e)
+                  }
                 }
               }
+              feedStreamingTTS(accumulated)
             }
-            feedStreamingTTS(accumulated)
           } catch (e) {
             console.error('[shell] feedStreamingTTS:', e)
           }
@@ -237,6 +274,15 @@ export function useVoiceChatFlow(
           // 2026-08-15 S14: 同步清 pending(此前由 onStreamStart 承担)
           setPending(false)
           setCurrentThinking('')
+          // 2026-09-17: realtime 通道——终稿回喂实时模型口播, 不走本地 TTS。
+          // 首句已流式口播过则跳过(避免重复念)
+          if (ttsModeRef.current === 'realtime') {
+            if (!firstSentenceSpokenRef.current) {
+              const finalText = aiTextRef.current
+              try { onReplyFinalRef.current?.(finalText) } catch (e) { console.error('[shell] onReplyFinal:', e) }
+            }
+            return
+          }
           try {
             finalizeStreamingTTS()
           } catch (e) {
@@ -250,6 +296,11 @@ export function useVoiceChatFlow(
           setReplyCompleted(true)
           console.error('[shell] chat 流错误:', content)
           setAiText(prev => prev + (prev ? '\n' : '') + '（出错了，请重试）')
+          // 2026-09-17: realtime 通道——错误文案同样回喂口播
+          if (ttsModeRef.current === 'realtime') {
+            try { onReplyFinalRef.current?.(aiTextRef.current) } catch (e) { console.error('[shell] onError onReplyFinal:', e) }
+            return
+          }
           try {
             finalizeStreamingTTS()
           } catch (e) {
@@ -380,6 +431,12 @@ export function useVoiceChatFlow(
           setPending(false)
           setCurrentThinking('')
           setAiText(content)
+          // 2026-09-17: realtime 通道——补投全文直接回喂口播, 无本地 TTS
+          if (ttsModeRef.current === 'realtime') {
+            try { onReplyFinalRef.current?.(content) } catch (e) { console.error('[flow] 补投 onReplyFinal:', e) }
+            setReplyCompleted(true)
+            return
+          }
           try {
             if (!mutedRef.current) {
               const vc = voiceConfigRef.current

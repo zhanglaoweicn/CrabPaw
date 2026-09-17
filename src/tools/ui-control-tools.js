@@ -20,6 +20,7 @@ const UI_COMMANDS = [
   'open_search', 'open_doc', 'open_music', 'close_music',
   'open_hotspot', 'close_hotspot', 'open_weather', 'close_weather',
   'open_task_panel', 'close_task_panel', 'close_scene_card', 'new_conversation',
+  'close_doc',
 ];
 
 registry.register({
@@ -40,7 +41,7 @@ registry.register({
       command: {
         type: 'string',
         enum: UI_COMMANDS,
-        description: '界面操作: open/close_cockpit(管理舱,含专家/数据 tab)、open_search(搜索)、open_doc(文档舱)、open/close_music(音乐)、open/close_hotspot(热点)、open/close_weather(天气)、open/close_task_panel(任务面板)、close_scene_card(关闭最上层场景卡)、new_conversation(开始新对话)',
+        description: '界面操作: open/close_cockpit(管理舱,含专家/数据 tab)、open_search(搜索)、open_doc(文档舱)、open/close_music(音乐)、open/close_hotspot(热点)、open/close_weather(天气)、open/close_task_panel(任务面板)、close_scene_card(关闭最上层场景卡)、close_doc(关闭文件/文档生成面板)、new_conversation(开始新对话)',
       },
       tab: {
         type: 'string',

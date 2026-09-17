@@ -15,13 +15,14 @@ module.exports = {
     },
     {
       id: 'uictl_002',
-      name: 'schema 命令枚举合法(14 项)',
+      name: 'schema 命令枚举合法(15 项)',
       category: 'ui_control',
       run: () => {
         const t = registry.get('ControlUI');
         if (!t?.schema?.properties?.command?.enum) return false;
         const cmds = t.schema.properties.command.enum;
-        return cmds.length === 14
+        return cmds.length === 15
+          && cmds.includes('close_doc')
           && cmds.includes('open_cockpit')
           && cmds.includes('new_conversation')
           && cmds.includes('close_scene_card')

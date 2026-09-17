@@ -42,6 +42,7 @@ import { setSoundEnabled } from '../../hooks/useSoundEffects'
 import { apiGet, apiPost } from '../../lib/api'
 import { useDraggable } from '../../lib/useDraggable'
 import { ShellFloatCard } from '../../components/ShellFloatCard'
+import { sweepCompositorDeferred } from '../../lib/compositor'
 import { HeartbeatCard } from '../../components/HeartbeatCard'
 import { SysInfoCard } from '../../components/SysInfoCard'
 import { fileUrlFor, isImageAttachment, formatFileSize } from '../../lib/attachment'
@@ -156,6 +157,8 @@ interface ShellVoiceConfig extends VoiceConfig {
   // 2026-08-04: 对齐控制台 Settings 语音配置(VoiceSection)字段——识别语言/灵敏度
   lang?: string
   voiceThreshold?: number
+  /** 2026-09-17: 语音对话通道——classic=ASR+TTS 接力; realtime=豆包全双工端到端 */
+  dialogChannel?: 'classic' | 'realtime'
 }
 
 // ── 语音配置单源化（2026-08-12）───────────────────────────────────────────
@@ -470,7 +473,24 @@ export function VoiceShell() {
     // 新会话重置由 handleUserInput 里的 phaseDoneRef.clear() 统一负责。
   }, [])
 
-  const flow = useVoiceChatFlow(voiceConfig, muted, handlePhase)
+  // 2026-09-17: 语音对话通道——设置页切换, 缺省 classic(既有链路不动)
+  const dialogChannel: 'classic' | 'realtime' = shellConfig.dialogChannel === 'realtime' ? 'realtime' : 'classic'
+
+  const flow = useVoiceChatFlow(voiceConfig, muted, handlePhase, {
+    ttsMode: dialogChannel,
+    // realtime: 回复终稿(含断线补投/错误文案)回喂实时模型口播——模型自己有嗓音
+    onReplyFinal: (text: string) => {
+      const t = (text || '').trim()
+      if (!t) return
+      const w = window as any
+      if (typeof w.__rtVoiceSpeak === 'function') w.__rtVoiceSpeak(t)
+    },
+    // realtime: 首句流式口播——DeepSeek 回复第一个完整句立即出声(不等全文+工具链)
+    onReplySentence: (sentence: string) => {
+      const w = window as any
+      if (typeof w.__rtVoiceSpeak === 'function') w.__rtVoiceSpeak(sentence)
+    },
+  })
   // G7: 左右栏真实数据（SSE activity + memory stats + runs/active）
   const monitor = useAgentMonitor()
 
@@ -647,7 +667,20 @@ export function VoiceShell() {
   // P5.5: 共享播报队列（面板确认播报 + CollabOrbit 协作播报共用，防双音）
   // 2026-08-14: 播报队列跟随用户 TTS 配置(音色/语速)——此前 hook 内硬编码
   // zh-CN-XiaoxiaoNeural/1.0,Settings 修改对面板确认/阶段播报等队列播报不生效
-  const speech = useSpeechQueue({ isTtsPlaying: flow.ttsPlaying || flow.isSpeaking, muted, voice: shellConfig.defaultVoice, speed: shellConfig.speed })
+  const speechQueue = useSpeechQueue({ isTtsPlaying: flow.ttsPlaying || flow.isSpeaking, muted, voice: shellConfig.defaultVoice, speed: shellConfig.speed })
+  // 2026-09-17: 实时通道——确认播报(面板开关/导航/模式提示/阶段播报)统一改喂
+  // 实时模型口播(单一嗓子)。classic 豆包 TTS 队列在实时模式下不再出声,
+  // 避免"关卡片是另一个声音"的双通道混音。
+  const speech = useMemo(() => {
+    if (dialogChannel !== 'realtime') return speechQueue
+    return {
+      ...speechQueue,
+      enqueue: (job: { id: string; text: string; kind?: string }) => {
+        const w = window as any
+        if (typeof w.__rtVoiceSpeak === 'function') w.__rtVoiceSpeak(job.text)
+      },
+    }
+  }, [speechQueue, dialogChannel])
   // P7 Task 4: 将 speech 实例写入 ref，供阶段播报回调使用（hooks 顺序约束：speech 在 flow 之后）
   speechRef.current = speech
 
@@ -950,6 +983,9 @@ export function VoiceShell() {
       next.add(dismissKey(s))
       return next
     })
+    // 2026-09-17: GPU 幽灵层清扫——场景卡(台风地图 canvas 等)关闭后残留合成层
+    // 会"画"回屏幕(实测"关闭卡片后顶部菜单栏消失"三进宫), 与 SideSheet 同款兜底
+    sweepCompositorDeferred(600)
   }, [dismissKey])
   const visibleSurfaces = useMemo(
     () => stageSurfaces.filter(s => !dismissedIds.has(dismissKey(s))),
@@ -1048,6 +1084,28 @@ export function VoiceShell() {
     }
     // A1(2026-09-05): 经 ui-command-registry 注册(旧 window.__sceneShell 退役)
     const unregisterScene = registerCommandHost('sceneShell', api)
+    // 2026-09-17: 本地关卡桥(实时语音"关闭XX卡片"秒关, 不走 LLM)——
+    // kindHint 按口语关键词映射 surface kind; 无匹配/未指定时关最上层。
+    const w = window as any
+    w.__rtCloseCard = (kindHint?: string): string => {
+      const KIND_MAP: Array<{ re: RegExp; kinds: string[]; label: string }> = [
+        { re: /文件|文章|文档|doc/i, kinds: ['document', 'web-preview', 'contract'], label: '文件卡片' },
+        { re: /台风/, kinds: ['typhoon'], label: '台风卡片' },
+        { re: /天气/, kinds: ['weather'], label: '天气卡片' },
+        { re: /热点|新闻/, kinds: ['hotspot'], label: '热点卡片' },
+        { re: /日程|日历/, kinds: ['schedule'], label: '日程卡片' },
+        { re: /知识/, kinds: ['knowledge'], label: '知识库卡片' },
+      ]
+      if (kindHint) {
+        for (const entry of KIND_MAP) {
+          if (!entry.re.test(kindHint)) continue
+          const closed = entry.kinds.some(k => api.setVisible(k, false))
+          return closed ? `已关闭${entry.label}` : `当前没有${entry.label}`
+        }
+      }
+      api.closeTop()
+      return '已关闭最上层的卡片'
+    }
     return () => { unregisterScene() }
   }, [stageSurfaces, visibleSurfaces, dismissSurface, dismissKey])
   // G9: 原 I2 场景语义色 orbTint/orbVariant（含 latestSurface 中间量）已删——
@@ -1443,7 +1501,7 @@ export function VoiceShell() {
   const pendingMeetingRef = useRef<null | { label: string; expiresAt: number; launch: () => Promise<void> }>(null)
 
   // 公共输入处理：语音与文本输入共用（专注模式命令 → 面板命令 → 音乐快速关闭 → rearm + 发送）
-  const handleUserInput = useCallback((text: string, files?: { path: string; name: string }[]) => {
+  const handleUserInput = useCallback((text: string, files?: { path: string; name: string }[], voiceContext?: Array<{ text: string }>) => {
     const t = text.trim().toLowerCase()
     // 2026-08-07: 剥离呼唤前缀——用户每句常带"小龙女，…"，前缀污染导致
     // 面板命令全部落 LLM（幻觉播报"已打开"实际没执行 + 4-6s 慢响应）。
@@ -1925,7 +1983,7 @@ export function VoiceShell() {
     flow.setTranscript(text)
     // 2026-08-13 审查 P1: .catch 兜底——sendText 内部已捕获 chat 流错误,
     // 此处覆盖 ensureConversationId 等前置 await 的异常(拒绝静默失败)
-    flow.sendText(text, files)?.catch((err: Error) => {
+    flow.sendText(text, files, voiceContext)?.catch((err: Error) => {
       console.error('[shell] 消息发送失败(兜底):', err)
     })
     // 2026-08-13: P1-5 重试链路——记录用户消息到最近 running 任务面板
@@ -2953,6 +3011,7 @@ export function VoiceShell() {
         wakeWordEnabled={shellConfig.wakeWordEnabled && !muted}
         pttOnly={shellConfig.pttOnly && !muted}
         asrProvider={shellConfig.asrProvider}
+        dialogChannel={dialogChannel}
         sendMessage={handleUserInput}
         onStateChange={handleStateChange}
       />

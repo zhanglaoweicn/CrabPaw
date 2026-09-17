@@ -24,6 +24,8 @@ import { ensureAudioContextRunning, shouldBackpressure, WS_BUFFERED_THRESHOLD_BY
 // 2026-09-05 深度优化: HPF+AGC 收敛为共享件 voice-enhance(与 PTT 管线同源同参)
 import { createHighPass, createAgcBoost } from '../lib/voice-enhance'
 import { createCaptureNode, PCM_CHUNK_SAMPLES } from '../lib/audio-capture'
+// 2026-09-17: 实时端到端对话通道(豆包 Seeduplex)下行播放模块
+import { rtInitPlayback, rtSetCallbacks, rtPlayChunk, rtStopPlayback } from '../voice/rtPlayback'
 
 // ─── 常量 ───────────────────────────────────────────────
 const SAMPLE_RATE = 16000
@@ -91,13 +93,17 @@ export interface VoiceSessionOptions {
   continuous?: boolean
   asrWsUrl?: string
   asrProvider?: string
+  /** 2026-09-17: 语音对话通道——classic=ASR+TTS 接力(缺省); realtime=豆包全双工端到端 */
+  dialogChannel?: 'classic' | 'realtime'
+  /** 实时通道: 模型回复文本增量(供 UI 展示, classic 无此流) */
+  onReplyDelta?: (text: string) => void
   /** 每帧音量回调(0-1)。info 为可选第二参:1s 节流的窗口化活跃检测 {level, active}(能量驱动球体用,向后兼容) */
   onVolume?: (vol: number, info?: { level: number; active: boolean }) => void
   onInterim?: (text: string) => void
   onFinal?: (text: string) => void
   onStateChange?: (state: VoiceSessionState) => void
   onError?: (err: string) => void
-  getSendMessage?: () => (text: string) => void
+  getSendMessage?: () => (text: string, voiceContext?: Array<{ text: string }>) => void
 }
 
 interface VoiceSessionAPI {
@@ -131,6 +137,12 @@ interface VoiceSessionAPI {
   resumeAfterMedia: () => void
   mediaActive: boolean
   setMediaActive: (active: boolean) => void
+  /** 2026-09-17: 实时通道——任务完成后摘要回喂(模型口播); classic 下 no-op */
+  rtSpeak: (text: string) => void
+  /** 2026-09-17: 实时通道——打断模型当前播报; classic 下 no-op */
+  rtInterrupt: () => void
+  /** 2026-09-17: 实时通道——PTT 松手强制判停; classic 下 no-op */
+  rtCommit: () => void
 }
 
 // ─── Helpers ─────────────────────────────────────────────
@@ -143,7 +155,15 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
     getSendMessage,
     // 2026-08-01: ASR provider 此前只定义未消费，config 帧硬编码 volcengine
     asrProvider,
+    dialogChannel,
+    onReplyDelta,
   } = options
+
+  // ── 实时通道（2026-09-17）──
+  // classic 走 /voice/cloud(ASR 转写→文字进主链路→TTS); realtime 走 /voice/realtime
+  // (豆包全双工: 对话+转写由实时模型承担, 任务由后端检测后以 delegate 事件交回主链路)
+  const dialogChannelRef = useRef<'classic' | 'realtime'>(dialogChannel === 'realtime' ? 'realtime' : 'classic')
+  useEffect(() => { dialogChannelRef.current = dialogChannel === 'realtime' ? 'realtime' : 'classic' }, [dialogChannel])
 
   const [state, setState] = useState<VoiceSessionState>('idle')
   const [interimText, setInterimText] = useState('')
@@ -194,6 +214,17 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
   // 直接返回 false,不尝试不弹窗;设备恢复后冷却期满自动恢复
   const micDeviceFailureRef = useRef<{ name: string; ts: number } | null>(null)
   const langRef = useRef('zh')
+  // 2026-09-17: 实时通道解除静音的延迟定时器(等喇叭尾音衰减)
+  const rtUnmuteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 2026-09-17: 实时通道状态——模型播报中/能量抢话连击计数/口播排队
+  const rtSpeakingRef = useRef(false)
+  const rtBargeInLoudRef = useRef(0)
+  const rtPendingSpeakRef = useRef<string | null>(null)
+  // 断线续播: 记录最近一次口播文本与完成态——WS 意外断线重连后未播完的摘要重读
+  const rtEverReadyRef = useRef(false)
+  const rtLastSpeakRef = useRef<{ text: string; done: boolean }>({ text: '', done: true })
+  // 自愈保险: audio_start 后超过此时长仍卡在播报态(音频事件丢失)→ 强制复位
+  const rtAudioStartTsRef = useRef(0)
   const asrWsRef = useRef<WebSocket | null>(null)
   const asrWsIntentionalRef = useRef(false)
   const committedRef = useRef<Array<{ seg: string | null; text: string }>>([])
@@ -381,6 +412,49 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
   const lastKeepaliveTsRef = useRef(0)
   const handlePcmChunk = useCallback((i16: Int16Array) => {
     diagNoteChunk(i16.byteLength) // ASR 诊断：记一次 chunk
+    // ── 2026-09-17: 实时通道——常流水上行(静音自适应) ──
+    // 全双工模型需要连续实时音频流, 但两个电平规则必须遵守:
+    //   ① 静音帧裸发不增益——AGC 会把本底噪声放大到说话电平, 服务端永远
+    //      听不到"说完"的安静 → 回复被推迟到很久之后(实测主因);
+    //   ② 语音帧照常 AGC——保证识别灵敏度(USB 麦原声太小)。
+    // 模型播报期间上行由后端静音(防喇叭回灌), 播完立即恢复——非全双工抢话,
+    // 抢话用空格 PTT(该 USB 麦 AEC 压不住外放回灌, 常流水抢话会自打断)。
+    if (dialogChannelRef.current === 'realtime') {
+      const ws = asrWsRef.current
+      if (!ws || ws.readyState !== WebSocket.OPEN) return
+      // ── 能量抢话(2026-09-17): 模型播报中, 麦克风帧不上行(后端静音), 但本地做
+      // 能量监测——AEC 后连续 ~500ms 说话电平(>0.03) → 打断播报让出话头。
+      // 突破"必须等它说完"的限制; 误触发代价=模型被打断, 按空格可重说。
+      if (rtSpeakingRef.current) {
+        // ── 自愈保险(2026-09-17): audio_start 后 20s 仍卡在播报态(音频事件丢失/
+        // 状态卡死) → 强制复位恢复聆听。实测 tx=0 永久失聪的根因即状态卡死。
+        if (Date.now() - rtAudioStartTsRef.current > 20000) {
+          console.warn('[RT] 播报态超时 20s, 强制复位自愈')
+          rtSpeakingRef.current = false
+          rtStopPlayback()
+          rtWsSend({ type: 'interrupt' })
+          rtWsSend({ type: 'unmute' })
+          return
+        }
+        if (isSilentChunk(i16, 0.03)) {
+          rtBargeInLoudRef.current = 0
+        } else if (++rtBargeInLoudRef.current >= 4) {
+          rtBargeInLoudRef.current = 0
+          rtSpeakingRef.current = false
+          if (rtUnmuteTimerRef.current) { clearTimeout(rtUnmuteTimerRef.current); rtUnmuteTimerRef.current = null }
+          rtStopPlayback()
+          rtWsSend({ type: 'interrupt' })
+          rtWsSend({ type: 'unmute' })
+          console.log('[RT] 能量抢话 → 播报已打断, 话头交给用户')
+        }
+        return
+      }
+      // 静音帧裸发不增益——AGC 会把本底噪声放大到说话电平, 服务端永远
+      // 听不到"说完"的安静 → 回复被推迟(实测主因); 语音帧照常 AGC。
+      const frame = isSilentChunk(i16, 0.0004) ? i16 : boostInt16(i16)
+      try { ws.send(frame.buffer) } catch (e) { console.warn('[RT] PCM 发送失败:', e) }
+      return
+    }
     // 2026-08-04 修复:连续对话模式禁用静音门控——持续静音丢包 → 火山 ASR
     // 服务端 8s 无包判定会话结束(45000081)→ 用户停顿后会话已断,重连丢开头语音
     // → 连续对话"收听困难"(PTT 按住说话无停顿所以正常)。
@@ -443,6 +517,131 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
     try { asrWsRef.current.send(i16.buffer) } catch (e) { console.warn('[ASR] PCM 发送失败:', e) }
   }, [])
 
+  // ── 实时通道消息处理（2026-09-17, /voice/realtime 下行事件） ──
+  const rtWsSend = useCallback((obj: Record<string, unknown>) => {
+    const ws = asrWsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify(obj)) } catch (e) { console.warn('[RT] 控制帧发送失败:', e) }
+    }
+  }, [])
+
+  const handleRtMessage = useCallback((msg: any) => {
+    switch (msg.type) {
+      case 'ready':
+        // 2026-09-17: 断线续播——重连后(非首次)若上一条摘要未播完, 自动重读
+        if (rtEverReadyRef.current && rtLastSpeakRef.current.text && !rtLastSpeakRef.current.done) {
+          const text = rtLastSpeakRef.current.text
+          console.log('[RT] 重连续播:', text.slice(0, 30))
+          setTimeout(() => rtWsSend({ type: 'speak', text }), 400)
+        }
+        rtEverReadyRef.current = true
+        diag('[rt-ready]', msg.sessionId)
+        break
+      case 'asr': {
+        // 实时模型自带 ASR(累计式增量, final 为干净终稿)——仅驱动 UI 显示;
+        // 发送决策不在客户端: 闲聊模型自答, 任务由后端 delegate 事件交回
+        lastTranscriptTsRef.current = Date.now()
+        if (msg.final) {
+          setInterimText('')
+          onFinal?.(String(msg.text || ''))
+        } else {
+          setInterimText(String(msg.text || ''))
+          onInterim?.(String(msg.text || ''))
+        }
+        break
+      }
+      case 'audio_start':
+        lastTranscriptTsRef.current = Date.now()
+        rtSpeakingRef.current = true
+        rtAudioStartTsRef.current = Date.now()
+        if (rtUnmuteTimerRef.current) { clearTimeout(rtUnmuteTimerRef.current); rtUnmuteTimerRef.current = null }
+        break
+      case 'audio':
+        lastTranscriptTsRef.current = Date.now()
+        rtPlayChunk(String(msg.data || ''))
+        break
+      case 'audio_end':
+        // 播报结束: 静音解除由 rtSetCallbacks 的 onEnd 延迟处理(等喇叭尾音);
+        // 排队中的口播(模型说话期间到达的摘要)在尾音静默后补播
+        rtSpeakingRef.current = false
+        if (rtLastSpeakRef.current.text) rtLastSpeakRef.current.done = true
+        if (rtPendingSpeakRef.current) {
+          const pending = rtPendingSpeakRef.current
+          rtPendingSpeakRef.current = null
+          rtLastSpeakRef.current = { text: pending, done: false }
+          setTimeout(() => rtWsSend({ type: 'speak', text: pending }), 700)
+        }
+        break
+      case 'reply_delta':
+        onReplyDelta?.(String(msg.text || ''))
+        break
+      case 'reply_done':
+        onReplyDelta?.('')
+        break
+      case 'delegate': {
+        // 后端任务检测/模型 FC 命中 → 交给主链路(sendText, 与打字输入同链)
+        // 2026-09-17: 携带实时会话最近几轮话轮(上下文接力给 DeepSeek)
+        const utter = String(msg.utterance || '').trim()
+        if (!utter) break
+        const ctxTurns = Array.isArray(msg.context) ? msg.context : undefined
+        console.log('[RT] 任务委托 → 主链路:', utter.slice(0, 50))
+        transcriptSuppressUntilRef.current = Date.now() + 1500
+        setInterimText('')
+        const sendMsg = getSendMessage?.()
+        if (sendMsg) sendMsg(utter, ctxTurns)
+        break
+      }
+      case 'cancelled':
+        rtStopPlayback()
+        break
+      case 'error':
+        console.error('[RT] 服务端错误:', msg.message)
+        onError?.(msg.message)
+        break
+      default:
+        break
+    }
+  }, [onFinal, onInterim, onReplyDelta, onError, getSendMessage])
+
+  // ── 实时通道控制（2026-09-17, classic 通道下为 no-op）──
+  // 任务完成后口播摘要回喂: 后端 → speech_text_buffer.commit → 模型念出来。
+  // speech_text_buffer 面向短句设计——长文本会中途断声(实测), 按句截断+尾注,
+  // 与 classic 通道"完整内容已显示在屏幕上"的播报设计对齐。
+  const rtSpeak = useCallback((raw: string) => {
+    if (dialogChannelRef.current !== 'realtime') return
+    const text = String(raw || '').trim()
+    if (!text) return
+    let spoken = text
+    if (spoken.length > 110) {
+      const cut = spoken.slice(0, 110)
+      const idx = Math.max(
+        cut.lastIndexOf('。'), cut.lastIndexOf('！'), cut.lastIndexOf('？'),
+        cut.lastIndexOf('；'), cut.lastIndexOf('，'), cut.lastIndexOf('…'),
+      )
+      spoken = (idx > 40 ? cut.slice(0, idx + 1) : cut) + '……完整内容已显示在屏幕上'
+    }
+    // 模型播报中到达的口播自动排队(播完由 audio_end 分支补播), 不互相顶掉
+    if (rtSpeakingRef.current) {
+      rtPendingSpeakRef.current = spoken
+      return
+    }
+    rtLastSpeakRef.current = { text: spoken, done: false }
+    rtWsSend({ type: 'speak', text: spoken })
+  }, [rtWsSend])
+
+  // 打断实时模型当前播报(PTT/唤醒/卡片打断入口复用)
+  const rtInterrupt = useCallback(() => {
+    if (dialogChannelRef.current !== 'realtime') return
+    rtStopPlayback()
+    rtWsSend({ type: 'interrupt' })
+  }, [rtWsSend])
+
+  // PTT 松手: 强制判停(松开空格即本轮语音结束, 模型接话)
+  const rtCommit = useCallback(() => {
+    if (dialogChannelRef.current !== 'realtime') return
+    rtWsSend({ type: 'commit' })
+  }, [rtWsSend])
+
   // ── 统一 ASR 消息处理（connectCloudWs 和 resumeSession 共用） ──
   const handleAsrMessage = useCallback((ev: MessageEvent) => {
     try {
@@ -456,6 +655,16 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
       if (msg && msg.type === 'backpressure') {
         backpressureRef.current = msg.level === 'high' ? 'high' : 'ok'
         diag('[asr-backpressure]', msg.level)
+        return
+      }
+      // ── 实时通道分支（2026-09-17）: 下行事件全部走 handleRtMessage ──
+      if (dialogChannelRef.current === 'realtime') {
+        if (msg && msg.type === 'session' && msg.sessionId) {
+          sessionIdRef.current = msg.sessionId
+          ;(window as any).__voiceSessionId = msg.sessionId
+          return
+        }
+        handleRtMessage(msg)
         return
       }
       if (msg && msg.type !== 'transcript' && msg.type !== 'error' && msg.type !== 'no_speech_timeout' && msg.type !== 'diag') {
@@ -523,7 +732,7 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
     } catch (e) {
       console.error('[ASR] Parse error:', e)
     }
-  }, [applyTranscript, onError, resetTranscriptAccumulation, updateState, commitPendingInterim])
+  }, [applyTranscript, onError, resetTranscriptAccumulation, updateState, commitPendingInterim, dialogChannelRef, handleRtMessage])
 
   // ── 创建 ASR WebSocket 并绑定统一处理器 ──
   // 三处连接点（初始/barge-in/TTS恢复）共享此辅助函数，消除重复代码
@@ -556,6 +765,7 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
       backpressureRef.current = 'ok'
       bpBufferRef.current = []
       // 2026-08-01: provider 读配置（aliyun/tencent/xunfei/volcengine），默认 volcengine
+      // realtime 通道: provider/lang 字段后端忽略, config 帧仅承担会话标识
       ws.send(JSON.stringify({ type: 'config',
       sessionId: sessionIdRef.current || undefined, provider: asrProvider || 'volcengine', lang: langRef.current, continuous: continuousEnabledRef.current }))
       updateState('listening')
@@ -627,11 +837,13 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
   const connectCloudWs = useCallback(async () => {
     let wsUrl: string
     try {
+      // 2026-09-17: 按对话通道选端点——classic=/voice/cloud(ASR), realtime=/voice/realtime(豆包全双工)
+      const wsPath = dialogChannelRef.current === 'realtime' ? '/voice/realtime' : '/voice/cloud'
       // 2026-08-07 fix: getAuthenticatedWsUrl 此前在 try 外——Electron api:streamUrl
       // 或凭证获取失败时抛 rejection,startSession 的 await 链未接 .catch →
       // 未处理 rejection(审查报告 P2)。包进 try/catch 返回失败信号:不建 WS,
       // 由 watchdog/onclose 的既有重连机制继续重试
-      wsUrl = await getAuthenticatedWsUrl('/voice/cloud')
+      wsUrl = await getAuthenticatedWsUrl(wsPath)
     } catch (e: any) {
       console.error('[ASR] 获取 WS 地址失败:', e?.message || e)
       onError?.('语音识别连接失败:无法获取服务地址')
@@ -925,6 +1137,28 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
     await connectCloudWs()
     diagStart() // ASR 诊断：开始采集统计
 
+    // 2026-09-17: 实时通道——注入播放用 AudioContext。
+    // 播报期间静音上行(该 USB 麦 AEC 压不住外放回灌), 解除有讲究:
+    // 后端 audio_end 已按流去抖, 这里再加 500ms 延迟等喇叭尾音衰减——
+    // 否则残响被服务端转写成"用户说话"→ 模型自我打断(实测播报中断根因)。
+    if (dialogChannelRef.current === 'realtime') {
+      rtInitPlayback(audioCtxRef.current)
+      rtSetCallbacks(
+        () => {
+          if (rtUnmuteTimerRef.current) { clearTimeout(rtUnmuteTimerRef.current); rtUnmuteTimerRef.current = null }
+          rtWsSend({ type: 'mute' })
+        },
+        () => {
+          if (rtUnmuteTimerRef.current) clearTimeout(rtUnmuteTimerRef.current)
+          // 200ms: 后端已缓冲尾窗音频(不丢字), 短延迟仅防喇叭残响
+          rtUnmuteTimerRef.current = setTimeout(() => {
+            rtUnmuteTimerRef.current = null
+            rtWsSend({ type: 'unmute' })
+          }, 200)
+        },
+      )
+    }
+
     // 对标 CrabPaw voice-core.js 看门狗: 用户还在说话但 ASR 无响应 → 强制重连
     // 条件: 最近 1.2s 内有人声级音量(lastLoudTs) 且 超过 3.5s 没收到转录(lastTranscriptTs)
     // 安静环境下 lastLoudTs 不会更新，不会误触发重连
@@ -986,6 +1220,10 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
         return
       }
       const now = Date.now()
+      // 2026-09-17: 实时通道跳过 stalled 强拆——实时模型出转写/开口本来就有秒级
+      // 思考停顿,classic 的"有声但无转写→强拆"会误杀正常思考中的会话(整轮丢失)。
+      // 断线恢复由上方 not-OPEN 分支 + onclose 重连链承担。
+      if (dialogChannelRef.current === 'realtime') return
       // R21: 1200→3000——用户说完话后 1.2s 内没音量就判"不活跃"太敏感,
       // 配合 8s stalled 窗口,只在真正长时间无响应时才重连。
       const loudRecently = now - lastLoudTsRef.current < 3000
@@ -1019,6 +1257,9 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
     if (listeningStateTimerRef.current) { clearTimeout(listeningStateTimerRef.current); listeningStateTimerRef.current = null }
     if (suspendKeepaliveRef.current != null) { clearInterval(suspendKeepaliveRef.current); suspendKeepaliveRef.current = null }
     abortRef.current?.abort()
+
+    // 2026-09-17: 实时通道——停掉可能还在播的模型音频
+    rtStopPlayback()
 
     // 对标 CrabPaw voice-core.js stopCloudStream: 先 flush 再关闭 WS
     // V2: 使用 flush_speech_final 确保最后一段被标记为 speechFinal
@@ -1268,6 +1509,9 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
     pttHoldingRef.current = true
     setInterimText('')
 
+    // 2026-09-17: 实时通道——空格即打断模型播报(停本地播放+response.cancel)
+    rtInterrupt()
+
     if (isSuspendedForTTsRef.current) {
       // 2026-08-03: TTS 播放中按空格 → 先打断 TTS 再恢复 ASR。
       // 此前只 resumeSession——TTS 继续播 + ASR 录到 TTS 回声 → 用户感觉"无法打断"
@@ -1281,7 +1525,7 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
       // 2026-08-07: 防御性 .catch——startSession 内部已消化 rejection,此处兜底
       startSession().catch(e => console.warn('[VoiceSession] PTT 启动会话失败:', e))
     }
-  }, [resumeSession, startSession])
+  }, [resumeSession, startSession, rtInterrupt])
 
   const pttEnd = useCallback(async ({ send = true } = {}) => {
     pttHoldingRef.current = false
@@ -1340,12 +1584,19 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
     // 2026-08-15 S8/S3: 媒体播放挂起改为 stopMic + WS 常开(suspendShared 已改,
     // 不再拆 WS)——喇叭声不进麦克风(防连续模式幻听转写), 结束时复用现有连接
     suspendShared(false)
+    // 2026-09-17: 实时通道——媒体播放期间向上游发静音保活(音乐声不再喂给
+    // 全双工模型, 防"模型被音乐卡住/对着音乐胡言"), 会话保持存活
+    if (dialogChannelRef.current === 'realtime') rtWsSend({ type: 'mute' })
     updateState('media_paused')
-  }, [suspendShared, updateState])
+  }, [suspendShared, updateState, rtWsSend])
 
   const resumeAfterMedia = useCallback(() => {
     // 2026-08-15 S3: WS 常开——仅重建采集复用现有连接; WS 已死才重连
     updateState('idle')
+    // 2026-09-17: 实时通道——媒体结束, 解除静音恢复聆听(与 suspendForMedia 配对)
+    if (dialogChannelRef.current === 'realtime' && asrWsRef.current && asrWsRef.current.readyState === WebSocket.OPEN) {
+      rtWsSend({ type: 'unmute' })
+    }
     if (suspendKeepaliveRef.current != null) {
       clearInterval(suspendKeepaliveRef.current)
       suspendKeepaliveRef.current = null
@@ -1364,7 +1615,7 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
       isSuspendedForTTsRef.current = false
       connectCloudWs()
     }
-  }, [connectCloudWs, updateState, startMic, onError])
+  }, [connectCloudWs, updateState, startMic, onError, rtWsSend, dialogChannelRef])
 
   // ── 清理 ──
   useEffect(() => {
@@ -1407,5 +1658,8 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
     resumeAfterMedia,
     mediaActive,
     setMediaActive,
+    rtSpeak,
+    rtInterrupt,
+    rtCommit,
   }
 }

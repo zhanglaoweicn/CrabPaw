@@ -44,6 +44,8 @@ interface VoiceSectionProps {
     aliyunApiKey: string
     aliyunModel: string
     asrLang: string
+    dialogChannel: string
+    realtimeVoice: string
   }
   setVoiceConfig: React.Dispatch<React.SetStateAction<{
     replyEnabled: boolean
@@ -73,6 +75,8 @@ interface VoiceSectionProps {
     aliyunApiKey: string
     aliyunModel: string
     asrLang: string
+    dialogChannel: string
+    realtimeVoice: string
   }>>
   micDevices: MediaDeviceInfo[]
   audioOutputs: MediaDeviceInfo[]
@@ -188,6 +192,19 @@ export function VoiceSection({ activeSection, voiceConfig, setVoiceConfig, micDe
         <div className="p-4 rounded-lg theme-bg-tertiary">
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: 'var(--text-primary)' }}>通用设置</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+            <span style={{ width: 120, fontSize: 12, color: 'var(--text-secondary)', flexShrink: 0 }}>对话通道</span>
+            <select className="theme-input" style={{ flex: 1, maxWidth: 260 }} value={voiceConfig.dialogChannel || 'classic'} onChange={e => setVoiceConfig(prev => ({ ...prev, dialogChannel: e.target.value }))}>
+              <option value="classic">传统链路（ASR + TTS）</option>
+              <option value="realtime">实时端到端（豆包全双工，实验）</option>
+            </select>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>切换后下次语音会话生效</span>
+          </div>
+          {voiceConfig.dialogChannel === 'realtime' && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '-4px 0 10px 132px' }}>
+              实时通道：对话更低延迟更自然（复用火山语音 Key）；写文章/查数据等任务自动转交后台模型执行，结果卡片上屏、摘要口播。
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
             <span style={{ width: 120, fontSize: 12, color: 'var(--text-secondary)', flexShrink: 0 }}>语音回复</span>
             <ToggleSwitch checked={voiceConfig.replyEnabled} onChange={v => setVoiceConfig(prev => ({ ...prev, replyEnabled: v }))} />
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>开启后 AI 回复自动朗读</span>
@@ -267,7 +284,7 @@ export function VoiceSection({ activeSection, voiceConfig, setVoiceConfig, micDe
         {/* ═══ TTS 设置 ═══ */}
         <div className="p-4 rounded-lg theme-bg-tertiary">
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: 'var(--text-primary)' }}>语音合成设置</div>
-          <p className="text-xs theme-text-muted mb-3">TTS 服务商和 API Key 请在 <strong>模型配置 → TTS</strong> 卡片中设置。</p>
+          <p className="text-xs theme-text-muted mb-3">豆包语音密钥与音色请在 <strong>模型配置 → 语音服务（豆包）</strong> 卡片中设置（TTS/ASR/实时对话共用一把密钥）。</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
             <span style={{ width: 120, fontSize: 12, color: 'var(--text-secondary)', flexShrink: 0 }}>提示音效</span>
             {/* 2026-08-31 修复: 此开关此前零消费者(摆设)——接通 useSoundEffects 总闸,
@@ -285,7 +302,7 @@ export function VoiceSection({ activeSection, voiceConfig, setVoiceConfig, micDe
         {/* ═══ ASR 设置（简化） ═══ */}
         <div className="p-4 rounded-lg theme-bg-tertiary">
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: 'var(--text-primary)' }}>语音识别设置</div>
-          <p className="text-xs theme-text-muted mb-3">ASR 服务商和 API Key 请在 <strong>模型配置 → ASR</strong> 卡片中设置。</p>
+          <p className="text-xs theme-text-muted mb-3">使用豆包语音密钥（与 TTS/实时对话共用，见 <strong>模型配置 → 语音服务（豆包）</strong>）。</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ width: 120, fontSize: 12, color: 'var(--text-secondary)', flexShrink: 0 }}>识别语言</span>
             <select className="theme-input" style={{ flex: 1, maxWidth: 200 }} value={voiceConfig.asrLang || 'zh'} onChange={e => setVoiceConfig(prev => ({ ...prev, asrLang: e.target.value }))}>

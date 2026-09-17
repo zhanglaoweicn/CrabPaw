@@ -601,6 +601,14 @@ async function startServer(options = {}) {
     console.warn('[init] Voice Cloud WebSocket 启动失败:', e.message);
   }
 
+  // ── Voice Realtime WebSocket Server（豆包全双工实时对话通道, 与传统 ASR+TTS 并存可切）──
+  try {
+    const { attachVoiceRealtimeWS } = require('../handlers/voice-realtime-ws');
+    attachVoiceRealtimeWS(server, { apiKey: ADMIN_API_KEY });
+  } catch (e) {
+    console.warn('[init] Voice Realtime WebSocket 启动失败:', e.message);
+  }
+
   function shutdown(signal) {
     console.log(`\n🛑 收到 ${signal} 信号，正在优雅关闭...`);
     
@@ -694,6 +702,15 @@ async function startServer(options = {}) {
       console.log('✅ Voice Cloud WebSocket 已关闭');
     } catch (e) {
       console.warn('[shutdown] Voice Cloud WebSocket 关闭失败:', e.message);
+    }
+
+    // 清理 Voice Realtime WebSocket Server（豆包全双工对话通道）
+    try {
+      const { destroyVoiceRealtimeWS } = require('../handlers/voice-realtime-ws');
+      destroyVoiceRealtimeWS();
+      console.log('✅ Voice Realtime WebSocket 已关闭');
+    } catch (e) {
+      console.warn('[shutdown] Voice Realtime WebSocket 关闭失败:', e.message);
     }
     
     try {

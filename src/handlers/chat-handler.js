@@ -948,7 +948,7 @@ async function handleChat(req, res, ctx) {
  try {
 
  const data = await readJsonBody(req, { maxSize: 10 * 1024 * 1024 });
- const { message, stream, files, conversationId, userId: requestUserId, projectId, resume } = data;
+ const { message, stream, files, conversationId, userId: requestUserId, projectId, resume, voiceContext } = data;
 
  // 2026-08-13 P2-4: conversationId 启用——sess_* 前缀的会话 id 创建/续用后端会话,
  // 消息按会话落库、历史按会话过滤(上下文延续)。非法/非 sess_ 前缀降级 null。
@@ -1357,6 +1357,23 @@ async function handleChat(req, res, ctx) {
  // 如果启用了语音回复，注入"口语简洁性"提示 + 降低 temperature
  let voiceOptimizedConfig = ctx.appConfig;
  let voiceProcessedMessage = processedMessage;
+ // 2026-09-17: 实时语音上下文接力——委托自实时双工通道的任务, 携带实时会话最近几轮
+ // 用户话轮(实时模型会话与文字会话隔离, 此处把上下文补给 DeepSeek)。仅注入本轮
+ // LLM 消息(界面气泡/会话落库仍为用户原话), 不落独立消息。
+ if (Array.isArray(voiceContext) && voiceContext.length > 0) {
+ const turns = voiceContext
+ .map(t => {
+ const text = String((t && t.text) || '').trim().slice(0, 80);
+ return text ? `用户：${text}` : '';
+ })
+ .filter(Boolean)
+ .join('\n');
+ if (turns) {
+ voiceProcessedMessage = '[实时语音上下文（刚才会话的最近内容，仅供理解本轮请求，不要复述）]\n'
+ + turns
+ + '\n[/实时语音上下文]\n\n' + voiceProcessedMessage;
+ }
+ }
  if (speakEnabled) {
  // 克隆 config 以避免修改全局对象
  voiceOptimizedConfig = Object.assign({}, ctx.appConfig);

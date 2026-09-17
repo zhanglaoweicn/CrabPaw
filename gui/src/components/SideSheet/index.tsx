@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from 'react'
 import { activateSheet, closeSheet, registerSheet, setSheetDocument } from './sheet-state'
 import { computeCenterOffset } from './geometry'
 import { useDraggable } from '../../lib/useDraggable'
+import { sweepCompositor } from '../../lib/compositor'
 import './styles.css'
 
 export interface SideSheetProps {
@@ -61,7 +62,13 @@ export function SideSheet({ open, onClose, name, width = 'min(56vw, 860px)', fit
   const [fullyClosed, setFullyClosed] = useState(!open)
   useEffect(() => {
     if (open) { setFullyClosed(false); return }
-    const t = setTimeout(() => setFullyClosed(true), 500)
+    const t = setTimeout(() => {
+      setFullyClosed(true)
+      // 2026-09-17: GPU 幽灵层清扫——display:none 后残留合成层仍可能"画"回屏幕
+      // (用户实测"关闭台风卡后顶栏消失"三进宫), 同步 hide/reflow/show 强制
+      // 全量重光栅化, 无论残留层来自哪个元素必然销毁(单帧内完成, 用户不可见)
+      sweepCompositor()
+    }, 500)
     return () => clearTimeout(t)
   }, [open])
 

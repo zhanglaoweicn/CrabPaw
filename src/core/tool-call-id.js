@@ -96,6 +96,12 @@ function sanitizeMessagesForProvider(messages, provider) {
     if (!msg || typeof msg !== 'object') return msg;
     const sanitized = { ...msg };
 
+    // 2026-09-18 会话膨胀治理: 剥离消息级内部字段——id 是 history.db 行主键(压缩
+    // 写回定位用), isSummary 是压缩器摘要标记;两者都不是 chat 协议字段, 不进请求体。
+    // 注意与工具调用层的 tc.id 区分(那是协议必需, 保留)。
+    delete sanitized.id;
+    delete sanitized.isSummary;
+
     if (sanitized.tool_calls) {
       sanitized.tool_calls = sanitized.tool_calls.map(tc => {
         if (!tc || typeof tc !== 'object') return tc;

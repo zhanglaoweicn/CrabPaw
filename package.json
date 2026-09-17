@@ -101,7 +101,19 @@
         ],
         "testPathIgnorePatterns": [
             "/node_modules/",
-            "<rootDir>/tests/e2e/"
+            "<rootDir>/tests/e2e/",
+            "<rootDir>/CrabPaw-Release/",
+            "<rootDir>/portable/",
+            "<rootDir>/out/",
+            "<rootDir>/gui/resources/",
+            "<rootDir>/data/"
+        ],
+        "modulePathIgnorePatterns": [
+            "<rootDir>/CrabPaw-Release/",
+            "<rootDir>/portable/",
+            "<rootDir>/out/",
+            "<rootDir>/gui/resources/",
+            "<rootDir>/data/"
         ]
     }
 }

@@ -486,6 +486,10 @@ const defaultConfig = {
     ttsProvider: 'doubao',
     defaultVoice: 'zh_female_xiaohe_uranus_bigtts',
     speed: 1.0,
+    // 2026-09-17: 语音对话通道——classic=既有 ASR→主链路→TTS 接力;
+    // realtime=豆包 Seeduplex 全双工端到端(对话实时模型, 任务经 /voice/realtime
+    // 委托检测走主链路)。两套并存, 设置页切换, 缺省 classic 不改变存量体验。
+    dialogChannel: 'classic',
   },
   tts: {
     provider: 'doubao',

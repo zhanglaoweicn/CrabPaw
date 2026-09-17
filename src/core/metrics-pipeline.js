@@ -10,9 +10,18 @@ const { EventEmitter } = require("events");
 const fs = require("fs");
 const path = require("path");
 const { DATA_DIR } = require("./config");
+const { atomicWriteFile } = require("./atomic-write");
 
 const METRICS_DIR = path.join(DATA_DIR, ".crabpaw", "metrics");
 const SNAPSHOT_INTERVAL_MS = 30000;
+// 2026-09-18: 旧实现每次快照写全新 snapshot_<时间戳>.json,不轮换不清理——实测
+// 堆积 263 万个文件(磁盘被吃 + jest 全树爬取挂死),且无任何读取方(消费方全部
+// 走内存态 getSnapshot)。改为单文件原子覆盖,保留"崩溃后查最后状态"的价值;
+// 启动时后台流式清扫历史 snapshot_* 遗留文件(流式避免百万级 readdir 内存爆炸)。
+const SNAPSHOT_FILE = "snapshot-latest.json";
+const LEGACY_SNAPSHOT_RE = /^snapshot_\d+\.json$/;
+const PURGE_BATCH_SIZE = 100;
+const PURGE_START_DELAY_MS = 30000;
 
 class MetricsPipeline extends EventEmitter {
   constructor(config = {}) {
@@ -49,6 +58,7 @@ class MetricsPipeline extends EventEmitter {
       this._ensureMetricsDir();
       this._snapshotTimer = setInterval(() => this._takeSnapshot(), this._snapshotInterval);
       if (this._snapshotTimer.unref) this._snapshotTimer.unref();
+      this._purgeLegacySnapshots();
     }
 
     // ── EventBus 订阅（使用 startTime 配对计算延迟）─────────
@@ -114,6 +124,34 @@ class MetricsPipeline extends EventEmitter {
 
   _ensureMetricsDir() {
     try { fs.mkdirSync(this._metricsDir, { recursive: true }); } catch (_) { console.warn('[metrics-pipeline] Failed to create metrics directory'); }
+  }
+
+  /**
+   * 后台流式清扫历史 snapshot_<时间戳>.json 遗留文件。
+   * 用 opendir 逐条流式遍历(百万级文件时 readdirSync 全量列举会内存爆炸),
+   * 分批 unlink 不阻塞启动。目录已干净时开销可忽略,无需一次性标记。
+   */
+  _purgeLegacySnapshots() {
+    const delay = Number(process.env.METRICS_PURGE_DELAY_MS);
+    setTimeout(async () => {
+      try {
+        let batch = [];
+        let purged = 0;
+        const dir = await fs.promises.opendir(this._metricsDir);
+        for await (const entry of dir) {
+          if (entry.isFile() && LEGACY_SNAPSHOT_RE.test(entry.name)) {
+            batch.push(fs.promises.unlink(path.join(this._metricsDir, entry.name)).catch(() => {}));
+            purged++;
+            if (batch.length >= PURGE_BATCH_SIZE) {
+              await Promise.all(batch);
+              batch = [];
+            }
+          }
+        }
+        if (batch.length > 0) await Promise.all(batch);
+        if (purged > 0) console.log(`[metrics-pipeline] 历史快照清扫完成: ${purged} 个遗留 snapshot 已删除`);
+      } catch (_) { /* 目录不存在等场景忽略 */ }
+    }, Number.isFinite(delay) && delay >= 0 ? delay : PURGE_START_DELAY_MS).unref?.();
   }
 
   _getBucket(values, buckets, value) {
@@ -263,8 +301,8 @@ class MetricsPipeline extends EventEmitter {
   async _takeSnapshot() {
     try {
       const snapshot = this.getSnapshot();
-      const file = path.join(this._metricsDir, `snapshot_${Date.now()}.json`);
-      await fs.promises.writeFile(file, JSON.stringify(snapshot, null, 2));
+      // 2026-09-18: 单文件原子覆盖(旧实现每次新建 snapshot_<时间戳>.json 导致无上限堆积)
+      await atomicWriteFile(path.join(this._metricsDir, SNAPSHOT_FILE), JSON.stringify(snapshot, null, 2));
     } catch (_) { console.warn('[metrics-pipeline] Failed to take snapshot'); }
   }
 

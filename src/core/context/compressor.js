@@ -9,6 +9,10 @@ const SUMMARY_THRESHOLD = 0.7;
 const PROTECT_FIRST_N = 2;
 const TAIL_TOKEN_BUDGET_RATIO = 0.15;
 const MIN_TAIL_MESSAGES = 3;
+// 层3(2026-09-18 会话膨胀治理): 尾部保护窗 token 硬上限——旧逻辑只按条数保护
+// (最少保 3 条),巨消息落在尾部时被无条件护住,每轮压缩只省 2% 永远追不上。
+// 超上限从尾部最老一侧开始摘要,条数下限让位于预算。
+const TAIL_PROTECT_TOKEN_CAP = 8000;
 const MAX_INEFFECTIVE_COMPRESSIONS = 2;
 const SUMMARY_FAILURE_COOLDOWN_MIN = 60;
 
@@ -516,6 +520,8 @@ class ContextCompressor {
       let accumulated = 0;
       let budgetBoundary = n;
       const minProtect = Math.min(protectTailCount, n);
+      // 层3: 与 _findTailCutByTokens 同源——保护边界不超过尾部硬上限
+      const pruneCeiling = Math.min(this.tailTokenBudget * 1.5, TAIL_PROTECT_TOKEN_CAP);
       for (let i = n - 1; i >= 0; i--) {
         const msg = result[i];
         const rawContent = _contentText(msg.content);
@@ -527,7 +533,7 @@ class ContextCompressor {
             }
           }
         }
-        if (accumulated + msgTokens > this.tailTokenBudget * 1.5 && (n - i) >= minProtect) {
+        if (accumulated + msgTokens > pruneCeiling && (n - i) >= minProtect) {
           budgetBoundary = i;
           break;
         }
@@ -688,7 +694,9 @@ class ContextCompressor {
     const tokenBudget = this.tailTokenBudget;
     const n = messages.length;
     const minTail = Math.min(MIN_TAIL_MESSAGES, n - headEnd - 1 > 0 ? n - headEnd - 1 : 0);
-    const softCeiling = Math.floor(tokenBudget * 1.5);
+    // 层3: 尾部保护上限 = min(1.5×tailBudget, 硬上限 8K)——巨消息占满预算时
+    // 宁可少保条数,也不再按条数下限强护(旧逻辑 83K 溢出会话压缩只省 2% 的根因)
+    const hardCeiling = Math.min(Math.floor(tokenBudget * 1.5), TAIL_PROTECT_TOKEN_CAP);
     let accumulated = 0;
     let cutIdx = n;
 
@@ -705,13 +713,27 @@ class ContextCompressor {
         }
       }
 
-      if (accumulated + msgTokens > softCeiling && (n - i) >= minTail) break;
+      // 超上限即停:只要最新 1 条已保住,就允许把切割点压进尾部——尾部更老的
+      // 巨消息落入摘要范围(超预算从尾部最老开始摘要),而非被条数下限强护
+      if (accumulated > 0 && accumulated + msgTokens > hardCeiling) break;
       accumulated += msgTokens;
       cutIdx = i;
     }
 
+    // 条数下限(minTail)只在预算内补足
     const fallbackCut = n - minTail;
-    if (cutIdx > fallbackCut) cutIdx = fallbackCut;
+    if (cutIdx > fallbackCut) {
+      let extendTokens = 0;
+      for (let i = cutIdx - 1; i >= fallbackCut; i--) {
+        extendTokens += estimateTokens(messages[i]?.content) + 10;
+        if (messages[i]?.tool_calls) {
+          for (const tc of messages[i].tool_calls) {
+            if (tc.function?.arguments) extendTokens += estimateTokens(tc.function.arguments);
+          }
+        }
+      }
+      if (accumulated + extendTokens <= hardCeiling) cutIdx = fallbackCut;
+    }
     if (cutIdx <= headEnd) cutIdx = Math.max(fallbackCut, headEnd + 1);
 
     cutIdx = this._alignBoundaryBackward(messages, cutIdx);
@@ -1006,15 +1028,17 @@ ${templateSections}`;
 
     // 2026-08-06: 严重溢出(>1.5x maxTokens)时强制压缩——即使连续压缩无效也尝试，
     // 否则上下文无限增长 → API 400(实测溢出223%后请求被拒)。宁可有损也不失败。
+    // 2026-09-18 层2: 内层预算化 pass(_forcePass)绕过熔断/冷却——刚拿到实质进展的
+    // 连续压缩不该被上一轮"效果不佳"计数挡住
     const severeOverflow = currentTokens > effectiveMaxTokens * 1.5;
-    if (this._ineffectiveCompressionCount >= MAX_INEFFECTIVE_COMPRESSIONS && !severeOverflow) {
+    if (this._ineffectiveCompressionCount >= MAX_INEFFECTIVE_COMPRESSIONS && !severeOverflow && !options._forcePass) {
       if (!this.quietMode) {
         console.log('⏸️ 跳过压缩：连续多次压缩效果不佳，避免无效循环');
       }
       return { messages, compressed: false, originalTokens: currentTokens, skipped: true };
     }
 
-    if (Date.now() < this._summaryFailureCooldownUntil && !severeOverflow) {
+    if (Date.now() < this._summaryFailureCooldownUntil && !severeOverflow && !options._forcePass) {
       if (!this.quietMode) {
         console.log('⏸️ 跳过压缩：摘要生成冷却中');
       }
@@ -1269,6 +1293,21 @@ ${templateSections}`;
       compressionNumber: this.compressionCount
     });
 
+    // 层2(2026-09-18 会话膨胀治理): 预算化循环压缩——一轮压缩后仍超阈值时,以
+    // 压缩结果为输入继续从最老压缩,直到进入预算(上限 3 轮,防 LLM 摘要费用失控)。
+    // removedIds 跨 pass 累计:多轮被替换的原始历史行最终一次写回删除,避免 DB 残留。
+    const pass = options._compressPass || 0;
+    const mergedRemovedIds = [...(options._prevRemovedIds || []), ...removedIdsForPersist];
+    if (newEstimate > thresholdTokens && pass < 2 && newEstimate < currentTokens * 0.9) {
+      return this.compress(sanitized, {
+        ...options,
+        currentTokens: newEstimate,
+        _compressPass: pass + 1,
+        _prevRemovedIds: mergedRemovedIds,
+        _forcePass: true,
+      });
+    }
+
     return {
       messages: sanitized,
       compressed: true,
@@ -1278,8 +1317,8 @@ ${templateSections}`;
       summary,
       prunedCount,
       savingsPct,
-      persist: removedIdsForPersist.length
-        ? { removedIds: removedIdsForPersist, summaryText: summary, summaryRole }
+      persist: mergedRemovedIds.length
+        ? { removedIds: mergedRemovedIds, summaryText: summary, summaryRole }
         : null
     };
   }

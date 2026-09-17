@@ -12,6 +12,8 @@
  */
 
 const { memoryManager } = require('./memory-system');
+// 2026-09-18 会话膨胀治理层1: 长内容入库前落档——历史只存预览+存档引用
+const { compactMessageContent } = require('./history-compactor');
 const { getUnifiedStore } = require('./memory/unified-store');
 const { HybridSearchEngine } = require('./hybrid-search');
 
@@ -68,6 +70,12 @@ async function getHybridRetrieval() {
  * 2026-08-13 P2-4: 增加 sessionId 参数——会话上下文与 userId 分离
  */
 async function addMessage(userId, role, content, sessionId = null) {
+  // 2026-09-18 会话膨胀治理层1: 长内容(文章草稿/长回复/粘贴长文)入库前落档——
+  // 所有持久化下游(会话内存/history.db/检索索引)只存预览+存档引用,增量不再膨胀
+  const persistedContent = (role === 'user' || role === 'assistant')
+    ? compactMessageContent(content, role)
+    : content;
+
   try { require('./memory-smart-loader').invalidateMemoryCache(userId); } catch (e) { console.warn('[unified-memory] Failed to invalidate cache:', e.message); }
 
   if (_memoryCache.size > 0) {
@@ -80,7 +88,7 @@ async function addMessage(userId, role, content, sessionId = null) {
   }
 
   // 主系统写入(存量三参调用 user_id 仍等于 sessionId,行为不变)
-  memoryManager.addMessage(sessionId || userId, role, content, userId);
+  memoryManager.addMessage(sessionId || userId, role, persistedContent, userId);
 
   // 增强系统写入（异步，不阻塞主流程）
   const enhanced = await getEnhancedMemory();
@@ -89,7 +97,7 @@ async function addMessage(userId, role, content, sessionId = null) {
       await enhanced.store({
         userId,
         type: 'conversation',
-        content: `[${role}] ${content}`,
+        content: `[${role}] ${persistedContent}`,
         importance: role === 'user' ? 0.5 : 0.3,
       });
     } catch (e) {
@@ -109,7 +117,7 @@ async function addMessage(userId, role, content, sessionId = null) {
         id: `${userId || 'default'}_${role}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         namespace: userId || 'default',
         title: `${role} message`,
-        content: content,
+        content: persistedContent,
         metadata: JSON.stringify({
           role,
           userId,
@@ -122,14 +130,14 @@ async function addMessage(userId, role, content, sessionId = null) {
       // 2026-08-20: 图谱实喂——会话消息实体喂入图谱（best-effort，失败不阻断）
       try {
         const { feedConversationMessage } = require('./memory/knowledge-feed');
-        feedConversationMessage({ messageId: doc.id, text: content });
+        feedConversationMessage({ messageId: doc.id, text: persistedContent });
       } catch (e) { console.error('[unified-memory] 图谱喂入失败（已忽略）:', e.message); }
 
       // 同时索引到混合检索引擎（向量 + FTS + 图谱）
       const hybrid = await getHybridRetrieval();
       if (hybrid) {
         try {
-          await hybrid.indexContent(doc.id, content, {
+          await hybrid.indexContent(doc.id, persistedContent, {
             namespace: doc.namespace,
             type: 'memory',
             metadata: { role, userId, timestamp: Date.now() },
