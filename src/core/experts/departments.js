@@ -193,7 +193,10 @@ const DEPARTMENT_SKILLS = Object.freeze({
   sales: ['review-analyzer', 'product-research', 'productivity'],
   hr_admin: ['meeting-summary', 'word-docx', 'summarize-pro'],
   tech_digital: ['code-review', 'api-tester', 'git-ops', 'systematic-debugging', 'shell-enhance', 'html-generator', 'remotion-video', 'hyperframes-video'],
-  legal: ['doc-processor', 'pdf-to-word-docx', 'summarize-pro'],
+  // 2026-09-18: pdf-to-word-docx(ComPDFKit 专有转换)已随 98c3f81 技能目录迁移移出
+  // 内置 skills/ 根(仅存用户 data/skills)——法务部条目改挂内置 pdf-generator
+  // (合同/发票等 PDF 文档生成), 维持"技能名=skills/ 目录真名"纪律
+  legal: ['doc-processor', 'pdf-generator', 'summarize-pro'],
   strategy_invest: ['deep-research', 'report-generator', 'chart-generator', 'powerpoint-pptx', 'trending-monitor'],
 });
 
