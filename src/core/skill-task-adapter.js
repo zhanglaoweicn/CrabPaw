@@ -56,7 +56,7 @@ const SCENARIOS = {
     name: 'information_retrieval',
     description: '信息检索和查询',
     keywords: ['查询', '搜索', '获取', '查找', '信息', '天气'],
-    preferredSkills: ['weather', 'agent-browser', 'multi-search-engine'],
+    preferredSkills: ['weather', 'multi-search-engine'],
     complexity: 'low',
     requiresData: false
   },

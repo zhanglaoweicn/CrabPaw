@@ -55,7 +55,6 @@ const SKILL_DISPLAY_NAMES = {
   'markdown-converter': { displayName: '📝 Markdown转换', category: '文档' },
   'pdf-smart-tool-cn': { displayName: '📄 PDF工具', category: '文档' },
   'pptx-generator': { displayName: '📽️ PPT生成', category: '文档' },
-  'agent-browser': { displayName: '🌐 浏览器代理', category: '网络' },
   'code-review': { displayName: '🔍 代码审查', category: '开发' },
   'git-ops': { displayName: '🔀 Git操作', category: '开发' },
   'shell-enhance': { displayName: '💻 Shell增强', category: '系统' },

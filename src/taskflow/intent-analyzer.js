@@ -46,7 +46,6 @@ const SKILL_KEYWORDS = {
   'healthcheck': [/健康检查|系统检查|healthcheck/i],
   'system-info': [/系统信息|系统状态|system info/i],
   'desktop-control': [/桌面控制|自动化操作|desktop/i],
-  'agent-browser': [/网页浏览|打开网页|browse web/i],
   'frontend-design-ultimate': [/前端设计|UI设计|frontend/i],
   'workflow-designer': [/工作流设计|流程设计|workflow design/i],
   'agent-team-orchestration': [/团队协作|多Agent|team orchestration/i],

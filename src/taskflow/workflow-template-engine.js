@@ -311,21 +311,6 @@
     }
   },
 
-  'web_browse': {
-    id: 'web_browse',
-    name: '网页浏览',
-    description: '浏览和提取网页信息',
-    category: 'research',
-    keywords: ['浏览网页', '打开网页', '网页内容', 'browse', 'web', '网站', '访问网页'],
-    steps: [
-      { type: 'skill', skill: 'agent-browser', input: 'mode=browse' }
-    ],
-    params: {
-      url: { type: 'string', required: true, description: '网页地址' },
-      action: { type: 'string', default: 'extract', description: '操作类型' }
-    }
-  },
-
   'frontend_design': {
     id: 'frontend_design',
     name: '前端设计',
@@ -1391,7 +1376,6 @@ class WorkflowTemplateEngine {
       { test: /摘要|总结|概括|summarize/i, skill: 'summarize-pro', input: 'action=summarize' },
       { test: /系统|检查|健康|system|health/i, skill: 'healthcheck', input: 'mode=full' },
       { test: /桌面|自动|desktop|automation/i, skill: 'desktop-control', input: 'mode=auto' },
-      { test: /网页|浏览|browse|web/i, skill: 'agent-browser', input: 'mode=browse' }
     ];
 
     for (const mapping of skillMapping) {
