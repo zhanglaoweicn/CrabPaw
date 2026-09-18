@@ -82,7 +82,7 @@ const TASK_CATEGORIES = {
   DESKTOP_AUTOMATION: {
     name: 'desktop-automation',
     keywords: ['桌面自动化', 'UI自动化', '鼠标控制', '键盘控制', '窗口管理', '桌面操作', '点击', '截图', 'desktop', 'ui-automation', 'mouse', 'keyboard', 'window'],
-    skills: ['windows-ui-automation']
+    skills: []
   },
   WECHAT_SEARCH: {
     name: 'wechat-search',
@@ -322,7 +322,6 @@ const INTENT_PATTERNS = [
   {
     pattern: /(?:桌面自动化|UI自动化|鼠标控制|键盘控制|窗口管理|点击.*按钮|自动.*输入|窗口截图|桌面操作)/i,
     category: 'DESKTOP_AUTOMATION',
-    skillHint: 'windows-ui-automation',
     confidence: 0.9
   },
   {

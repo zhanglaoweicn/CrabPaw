@@ -31,6 +31,22 @@ function getExpertsApi() {
 
 /** 会话级激活状态: userId -> { expertId, name, score, at, missCount } */
 const _activeByUser = new Map();
+
+// 2026-09-18 专家体系审计(P5 前置): 使用统计接线——此前 expert-stats.json 只有
+// 2 条陈旧记录, 专家留裁增补无据可依。激活/召唤即计数(同文件读改写, 激活是
+// 低频事件, 同步写可接受), 为泊车瘦身与明星岗位扩编提供数据。
+const _expertStatsPath = require('path').join(require('./config').DATA_DIR, 'expert-stats.json');
+function _recordExpertUsage(expertId) {
+  if (!expertId) return;
+  try {
+    let stats = {};
+    try { stats = JSON.parse(require('fs').readFileSync(_expertStatsPath, 'utf-8')); } catch (e) { /* 首次无文件 */ }
+    stats.expertUsage = stats.expertUsage || {};
+    const cur = stats.expertUsage[expertId] || { count: 0 };
+    stats.expertUsage[expertId] = { count: (cur.count || 0) + 1, lastUsedAt: Date.now() };
+    require('fs').writeFileSync(_expertStatsPath, JSON.stringify(stats, null, 2), 'utf-8');
+  } catch (e) { console.warn('[expert-context] 使用统计写入失败:', e?.message || e); }
+}
 const DECAY_ROUNDS = 3;      // 未命中新专家时保持 3 轮
 // 2026-09-05 修复: routeMessage 输出 0-100 归一化整数(experts/index.js L542), 此前阈值
 // 0.15 与分制错配 = 任何 1 个关键词命中即激活人设接管对话。下限应为 15(即 15% 置信)。
@@ -56,6 +72,7 @@ function routeAndActivate(userId, message) {
       missCount: 0, // 命中清零
     });
     if (prev?.expertId !== top.expertId) {
+      _recordExpertUsage(top.expertId);
       console.log(`🎭 [expert-context] 激活专家「${top.name}」 (score=${top.score}, kw=${(top.matchedKeywords || []).slice(0, 3).join('/')})`);
       // 2026-09-18 召唤体验轮: 激活反馈可视化——GUI/语音明确告知"已切换给谁、
       // TA 专属技能包是什么"(三元组第三元对用户可见), 替代此前的静默切换
@@ -138,6 +155,7 @@ function activateExpert(userId, expertId, { source = 'summon' } = {}) {
     at: Date.now(),
     missCount: 0,
   });
+  _recordExpertUsage(expertId);
   console.log(`🎭 [expert-context] 召唤激活专家「${expert.name}」(source=${source})`);
   try {
     const a = getActiveExpert(userId);

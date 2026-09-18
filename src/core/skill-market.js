@@ -145,7 +145,6 @@ const BUILTIN_MARKETPLACE = [
   { name: 'product-research', displayName: '产品调研', category: 'analysis', description: '产品市场调研和竞品分析' },
   { name: 'promo-planner', displayName: '促销规划', category: 'marketing', description: '营销活动规划和促销策略制定' },
   { name: 'file-manager', displayName: '文件管理', category: 'system', description: '文件浏览、搜索和管理工具' },
-  { name: 'file-organizer', displayName: '文件整理', category: 'productivity', description: '智能文件分类和整理助手' },
   { name: 'doc-processor', displayName: '文档处理', category: 'document', description: '文档格式转换和批量处理' },
   { name: 'markdown-converter', displayName: 'Markdown 转换', category: 'document', description: 'Markdown与多种格式互相转换' },
   { name: 'report-generator', displayName: '报告生成', category: 'document', description: '自动化报告生成，支持数据可视化' },

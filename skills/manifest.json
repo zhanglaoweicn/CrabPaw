@@ -3,11 +3,9 @@
   "noExecutor": [
     "shell-enhance",
     "file-manager",
-    "file-organizer",
     "browser-use",
     "system-info",
     "desktop-control",
-    "windows-ui-automation",
     "doc-processor",
     "markdown-converter",
     "wechat-article-search",
@@ -21,11 +19,9 @@
       "skills": [
         "shell-enhance",
         "file-manager",
-        "file-organizer",
         "browser-use",
         "system-info",
-        "desktop-control",
-        "windows-ui-automation"
+        "desktop-control"
       ],
       "required": true
     },

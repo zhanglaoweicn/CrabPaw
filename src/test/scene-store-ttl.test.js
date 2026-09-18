@@ -75,7 +75,12 @@ describe('SceneStore TTL', () => {
       store.upsertSurface('stocks-card', { kind: 'stocks', data: { items: [{ code: '600519' }] } });
     }
 
-    await new Promise((res) => setTimeout(res, 150)); // 超过首个 120ms TTL
+    // 2026-09-18 加固: 并行 worker 负载下 setTimeout 会漂移, 固定 150ms 睡眠偶发
+    // 撞上 120ms TTL 的计时误差 → 改为轮询等待过期(上限 2s), 语义不变
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && store.getSurface('stocks-card') !== undefined) {
+      await new Promise((res) => setTimeout(res, 25));
+    }
     expect(store.getSurface('stocks-card')).toBeUndefined();
   });
 

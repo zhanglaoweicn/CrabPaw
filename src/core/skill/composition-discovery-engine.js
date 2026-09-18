@@ -318,7 +318,6 @@ class CompositionDiscoveryEngine extends EventEmitter {
       'multi-search-engine': '搜索',
       'file-manager': '文件管理',
       'browser-use': '浏览器',
-      'windows-ui-automation': '桌面自动化',
       'wechat-article-search': '微信搜索',
       'self-improving-agent': '自我改进',
     };

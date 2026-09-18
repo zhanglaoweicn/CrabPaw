@@ -77,7 +77,6 @@ const SKILL_DISPLAY_NAMES = {
   'email-assistant': { displayName: '📧 邮件助手', category: '效率' },
   'doc-processor': { displayName: '📄 文档处理', category: '文档' },
   'report-generator': { displayName: '📊 报告生成', category: '文档' },
-  'file-organizer': { displayName: '🗂 文件整理', category: '系统' },
   'workflow-automator': { displayName: '🤖 工作流自动化', category: '自动化' },
 };
 

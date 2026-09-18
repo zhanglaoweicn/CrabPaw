@@ -52,7 +52,6 @@ const SKILL_LIST = [
   { id: 'image-analyze', name: '图片分析', category: 'media' },
   { id: 'healthcheck', name: '健康检查', category: 'system' },
   { id: 'file-manager', name: '文件管理', category: 'system' },
-  { id: 'file-organizer', name: '文件整理', category: 'productivity' },
   { id: 'doc-processor', name: '文档处理', category: 'document' },
   { id: 'markdown-converter', name: 'Markdown转换', category: 'document' },
   { id: 'system-info', name: '系统信息', category: 'system' },
