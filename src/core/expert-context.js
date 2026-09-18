@@ -57,6 +57,20 @@ function routeAndActivate(userId, message) {
     });
     if (prev?.expertId !== top.expertId) {
       console.log(`🎭 [expert-context] 激活专家「${top.name}」 (score=${top.score}, kw=${(top.matchedKeywords || []).slice(0, 3).join('/')})`);
+      // 2026-09-18 召唤体验轮: 激活反馈可视化——GUI/语音明确告知"已切换给谁、
+      // TA 专属技能包是什么"(三元组第三元对用户可见), 替代此前的静默切换
+      try {
+        const a = getActiveExpert(userId);
+        const { broadcastEvent } = require('./sse-broadcast');
+        broadcastEvent('expert_activated', {
+          expertId: a.id,
+          name: a.name,
+          title: a.title || '',
+          department: a.department || null,
+          departmentLabel: a.departmentLabel || null,
+          skills: a.allowedSkills || [],
+        });
+      } catch (e) { console.warn('[expert-context] 激活广播失败(不影响激活):', e?.message || e); }
     }
   } else {
     const prev = _activeByUser.get(userId);
@@ -125,6 +139,18 @@ function activateExpert(userId, expertId, { source = 'summon' } = {}) {
     missCount: 0,
   });
   console.log(`🎭 [expert-context] 召唤激活专家「${expert.name}」(source=${source})`);
+  try {
+    const a = getActiveExpert(userId);
+    const { broadcastEvent } = require('./sse-broadcast');
+    broadcastEvent('expert_activated', {
+      expertId: a.id,
+      name: a.name,
+      title: a.title || '',
+      department: a.department || null,
+      departmentLabel: a.departmentLabel || null,
+      skills: a.allowedSkills || [],
+    });
+  } catch (e) { console.warn('[expert-context] 召唤广播失败(不影响激活):', e?.message || e); }
   return renderState(userId);
 }
 

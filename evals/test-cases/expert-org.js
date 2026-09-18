@@ -3,7 +3,7 @@
  *
  * 断言四层事实：
  *  1. 部门注册表完整性——七部门齐备、别名可用、主管可解析、每部门有在编成员
- *  2. 导入管线产物——experts-org.json 全量 267 位带组织字段，在编/泊车分布合理
+ *  2. 导入管线产物——experts-org.json 全量 271 位带组织字段，在编/泊车分布合理
  *  3. 两级路由——部门别名命中、岗位别名强命中、泊车岗位被排除在自动路由之外
  *  4. 召唤解析四形态——id/岗位别名→expert、部门→department、未知→null、泊车显式可达
  * 套件红 = 有人破坏组织层（删部门/清别名/让泊车回流路由/管线产物损坏）。
@@ -49,7 +49,7 @@ module.exports = {
         if (!fs.existsSync(ORG_FILE)) throw new Error('data/experts-org.json 不存在——导入管线未跑(npm run experts:org)');
         const org = JSON.parse(fs.readFileSync(ORG_FILE, 'utf8'));
         const list = org.experts || [];
-        if (list.length !== 267) throw new Error(`组织库 ${list.length} ≠ 267(源数据被改动?)`);
+        if (list.length !== 271) throw new Error(`组织库 ${list.length} ≠ 271(源数据被改动?)`);
         const bad = list.filter(e => !['active', 'parked'].includes(e.status)
           || (e.status === 'active' && !e.department));
         if (bad.length > 0) throw new Error(`${bad.length} 位缺合法 status/department: ${bad.slice(0, 3).map(e => e.id).join(',')}`);
@@ -60,7 +60,7 @@ module.exports = {
           throw new Error('星标岗位 marketing-xiaohongshu-specialist 组织字段异常');
         }
         const parked = list.length - active;
-        return `全量 267: 在编 ${active} / 泊车 ${parked}`;
+        return `全量 271: 在编 ${active} / 泊车 ${parked}`;
       },
     },
     {

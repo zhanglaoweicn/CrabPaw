@@ -264,7 +264,7 @@ async function handleBash(params, context) {
             if (useTty) {
               await approval.respond(approvalRequest.requestId, false, 'once').catch(e => console.debug('[bash] Approval respond failed:', e?.message));
             }
-            throw new Error('⏱️ 审批超时或无终端输入，已自动拒绝');
+            throw new Error('⏱️ 审批超时或无终端输入，已自动拒绝。【必须转告用户】该操作需要在界面弹窗中点击"允许"才会执行，本次因未确认已取消；请向用户说明这一点，并询问是否重试（重试时请在弹窗出现后点允许），不要在未执行的情况下声称操作已完成。');
           }
           throw err;
         }

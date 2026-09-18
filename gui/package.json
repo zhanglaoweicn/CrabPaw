@@ -31,11 +31,15 @@
     "clsx": "^2.0.0",
     "cron-parser": "^5.5.0",
     "cronstrue": "^2.48.0",
+    "echarts": "6.1.0",
+    "highlight.js": "11.12.0",
     "katex": "^0.17.0",
     "leaflet": "1.9.4",
     "lucide-react": "^0.294.0",
+    "marked": "18.0.13",
     "mermaid": "^11.15.0",
     "pinyin-pro": "^3.26.0",
+    "pptxgenjs": "4.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^9.1.0",
@@ -44,7 +48,8 @@
     "remark-math": "^6.0.0",
     "sherpa-onnx-node": "^1.13.3",
     "sonner": "^1.2.2",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "xlsx": "0.18.5"
   },
   "devDependencies": {
     "@babel/plugin-transform-react-jsx": "8.0.1",
