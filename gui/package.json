@@ -163,7 +163,16 @@
           "!**/*.mp4",
           "!**/*.docx",
           "!**/*.日报*",
-          "!**/*日报*"
+          "!**/*日报*",
+          "!**/audit/**",
+          "!**/audit-log.json",
+          "!**/*.jsonl",
+          "!**/crabpaw-data-backup/**",
+          "!**/memory/**",
+          "!**/tmp_pip/**",
+          "!**/tmp_*",
+          "!**/jarvis-candidates/**",
+          "!**/backup.log"
         ]
       },
       {
