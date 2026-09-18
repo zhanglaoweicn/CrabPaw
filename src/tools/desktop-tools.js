@@ -470,6 +470,48 @@ async function openFolder(params) {
   }
 }
 
+async function openFile(params) {
+  // 2026-09-18 补缺: "打开文件供用户浏览"此前无合法通道——Bash start 撞审批闸
+  // (语音/桌面场景无终端可批, 实测"审批超时已自动拒绝"→模型降级为只读总结)。
+  // 与 open_folder 同模式: sanitizePath → 平台原生 ShellExecute → auditLog。
+  const { path: filePath } = params;
+  const safePath = sanitizePath(filePath);
+
+  if (!safePath) {
+    const result = { success: false, action: 'open_file', path: filePath, message: '路径无效或包含安全限制的目录', _risk: 'blocked' };
+    auditLog('open_file', params, result);
+    return result;
+  }
+
+  const platform = detectPlatform();
+  let command;
+
+  if (platform === 'win32') {
+    command = `Start-Process "${safePath}"`;
+  } else if (platform === 'darwin') {
+    command = `open "${safePath}"`;
+  } else {
+    command = `xdg-open "${safePath}"`;
+  }
+
+  try {
+    const result = await executeCommand(command);
+    const ret = {
+      success: result.success,
+      action: 'open_file',
+      path: safePath,
+      message: result.success ? `已用系统默认程序打开文件: ${safePath}` : `打开文件失败: ${result.stderr || '未知错误'}`,
+      exitCode: result.exitCode
+    };
+    auditLog('open_file', params, ret);
+    return ret;
+  } catch (e) {
+    const ret = { success: false, action: 'open_file', path: safePath, message: `打开文件异常: ${e.message}` };
+    auditLog('open_file', params, ret);
+    return ret;
+  }
+}
+
 async function searchWeb(params) {
   const { query, engine = 'bing' } = params;
   const engineUrls = {
@@ -899,6 +941,8 @@ async function handleDesktopControl(params) {
       return openUrl(params);
     case 'open_folder':
       return openFolder(params);
+    case 'open_file':
+      return openFile(params);
     case 'search_web':
       return searchWeb(params);
     case 'list_running_apps':

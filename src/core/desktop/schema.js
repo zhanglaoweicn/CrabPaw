@@ -19,6 +19,7 @@ const DESKTOP_CONTROL_PROPERTIES =   {
         "open_application",
         "open_url",
         "open_folder",
+        "open_file",
         "search_web",
         "list_running_apps",
         "activate_window",
@@ -68,7 +69,7 @@ const DESKTOP_CONTROL_PROPERTIES =   {
     },
     "path": {
       "type": "string",
-      "description": "文件夹路径（open_folder时使用）或截图保存路径（screenshot时可选）"
+      "description": "文件夹路径（open_folder时使用）、文件路径（open_file时使用，用系统默认程序打开）或截图保存路径（screenshot时可选）"
     },
     "query": {
       "type": "string",
