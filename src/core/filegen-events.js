@@ -80,7 +80,92 @@ function previewUrlFor(format, filePath) {
   }
 }
 
+/* ─── 2026-09-18 LoopX P1: 证据账本（跨重启恢复） ───
+ * 恢复链路此前仅进程内存活（currentTask 重启即丢）——Windows Update 强杀后
+ * "上次文档生成死在哪"彻底失忆。接入 evidence-ledger：
+ *   - 每次状态变更（_pushSurface 是全部变更路径的汇合点）upsert ev_filegen_<taskId>；
+ *   - 终态（done/error/cancelled）→ clear（无可恢复，防 checkpoints 堆积）；
+ *   - 三个查询入口（hasResumableTask/getPausedTask/getFileGenStatus）在内存无任务时
+ *     惰性从账本复活为 paused 壳——用户说"继续"即走既有 resumeFileGenTask 链路。
+ * 资料区/产物列表不复活（context 不可重建），nextTodo 里明示"资料需按需重新搜集"。
+ */
+let _evidenceLedger = null;
+let _evidenceRestoreAttempted = false;
+function _getLedger() {
+  if (!_evidenceLedger) {
+    const { createLedger } = require('./evidence-ledger');
+    _evidenceLedger = createLedger();
+  }
+  return _evidenceLedger;
+}
+
+function _syncEvidence() {
+  try {
+    const t = currentTask;
+    if (!t) return;
+    if (TERMINAL_PHASES.has(t.phase)) {
+      _getLedger().clear('filegen', t.taskId);
+      return;
+    }
+    _getLedger().record({
+      kind: 'filegen',
+      id: t.taskId,
+      status: t.phase === 'paused' ? 'blocked' : 'running',
+      step: t.phase,
+      summary: t.title,
+      evidence: {
+        format: t.format,
+        label: t.label,
+        expertName: t.expertName || undefined,
+        autoDocx: !!t.autoDocx,
+        artifacts: currentFiles.map((f) => f.name || f.path).slice(0, 10),
+        sourcesCount: currentSources.length,
+      },
+      blocker: t.phase === 'paused' ? (t.label || '等待用户补充信息') : undefined,
+      nextTodo: t.phase === 'paused'
+        ? '回复用户上次的追问，或说"继续"恢复生成（资料需按需重新搜集）'
+        : undefined,
+    });
+  } catch (e) {
+    console.warn('[filegen] 证据同步失败(不阻塞):', e.message);
+  }
+}
+
+/** 内存无任务时从账本复活最近一条可恢复记录（每进程只尝试一次；不广播不打扰） */
+function _restoreFromEvidence() {
+  if (_evidenceRestoreAttempted || currentTask) return;
+  _evidenceRestoreAttempted = true;
+  try {
+    const rec = _getLedger().listResumable({ kinds: ['filegen'] })[0];
+    if (!rec) return;
+    const ev = rec.evidence || {};
+    currentTask = {
+      taskId: rec.id,
+      title: rec.summary || '上次未完成的文档',
+      format: ev.format || 'md',
+      phase: 'paused',
+      label: '已暂停 · 应用重启前未完成，说"继续"恢复',
+      file: null, files: [], error: null,
+      startedAt: rec.updatedAt || Date.now(),
+      sources: [],
+      expertName: ev.expertName || null,
+      autoDocx: ev.autoDocx || undefined,
+      lastSubstantiveAt: 0,
+      pausedAt: Date.now(),
+      originalMessage: '',
+      registeredPaths: new Set(),
+      restoredFromCrash: true,
+    };
+    currentFiles = [];
+    currentSources = [];
+    console.log(`[filegen] 从证据账本恢复中断任务: ${rec.id} (死在 ${rec.step || '?'} 阶段${rec.stale ? ', 疑似进程被强杀' : ''})`);
+  } catch (e) {
+    console.warn('[filegen] 证据恢复失败(忽略):', e.message);
+  }
+}
+
 function _pushSurface() {
+  _syncEvidence(); // 2026-09-18 LoopX P1: 每次状态变更同步证据账本（终态清除，非终态 upsert）
   const { getSceneStore } = require('./scene/scene-store');
   getSceneStore().upsertSurface(FILE_PANEL_SURFACE, {
     kind: FILE_PANEL_KIND,
@@ -375,6 +460,7 @@ function beginTurn() {
  * 2026-09-06 恢复链路: 是否存在可恢复（非终态）任务——继续类消息命中时复活用。
  */
 function hasResumableTask() {
+  if (!currentTask) _restoreFromEvidence();
   return !!(currentTask && !TERMINAL_PHASES.has(currentTask.phase));
 }
 
@@ -406,6 +492,7 @@ function resumeFileGenTask() {
  * 往往不含文件词（"做关于智能家居的"），isFileGenIntent/isFileGenResumeMessage
  * 均不命中，需要独立的 paused 通道注入条件引导。 */
 function getPausedTask() {
+  if (!currentTask) _restoreFromEvidence();
   if (!currentTask || currentTask.phase !== 'paused') return null;
   const t = currentTask;
   return { taskId: t.taskId, title: t.title, format: t.format, label: t.label, pausedAt: t.pausedAt || 0 };
@@ -434,6 +521,8 @@ function broadcastDocStructure(taskId, format, markdown) {
 }
 
 function getFileGenStatus() {
+  // 2026-09-18 LoopX P1: 面板重开查询也是恢复入口——内存无任务时从证据账本复活
+  if (!currentTask) _restoreFromEvidence();
   // R2-4: 返回活引用并同步 files（面板快照含产物列表；测试模拟窗口过期需改 startedAt）
   if (currentTask) currentTask.files = currentFiles;
   return currentTask;

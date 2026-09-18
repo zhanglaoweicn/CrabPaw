@@ -8,7 +8,6 @@
 
 const { scanBusinessRisks } = require('./morning-briefing-service');
 const { notify } = require('./index');
-const ackStore = require('./ack-store');
 
 const WORK_START = 9;
 const WORK_END = 20;
@@ -29,7 +28,6 @@ function formatRiskAlert({ receivableOverdue, totalReceivable, topOverdueCustome
 class RiskAlertService {
   constructor() {
     this._timer = null;
-    this._lastScan = null;
   }
 
   _inWorkHours() {
@@ -37,12 +35,14 @@ class RiskAlertService {
     return h >= WORK_START && h < WORK_END;
   }
 
-  /** 巡检一次；返回告警条数 */
+  /** 巡检一次；返回实际播出条数 */
   async checkAndAlert({ businessDbPath, today, overdueDays } = {}) {
     try {
-      if (this._lastScan && Date.now() - this._lastScan < 30 * 60 * 1000) return 0;
+      // 2026-09-18 LoopX P0 收编：判定（gate 当日确认/配额/去重）全部下沉 kernel，
+      // 本服务只保留巡检调度（timer + 工作时段）。旧 _lastScan 去重与 ackStore
+      // 前置检查删除——同文本去重、当日确认、confront 配额(cap 8)由 kernel 原语承担；
+      // 数据变化 → 文本哈希变 → 去重/确认自然过期 → 自动恢复提醒（2026-09-06 语义保持）。
       if (!this._inWorkHours()) return 0;
-      this._lastScan = Date.now();
 
       const dbPath = businessDbPath || (() => {
         try { return require('path').join(require('../business-data-registry').BUSINESS_DIR, 'business.db'); } catch { return null; }
@@ -53,14 +53,11 @@ class RiskAlertService {
 
       const text = formatRiskAlert(risks);
       if (!text) return 0;
-      // 2026-09-06: 用户当日已确认同一内容（通知卡"今日不再提醒"回传）→ 不再播。
-      // 治"巡检间隔=去重窗口 → 同内容全天每 30 分钟重复"；数据变化（笔数/金额/
-      // 客户）后文本变哈希变，自动恢复提醒。
-      if (ackStore.isAckedToday('risk_alert', text)) return 0;
-      notify({
+      const r = notify({
         trigger: 'risk_alert',
         text,
         intent: risks.receivableOverdue > 0 ? 'confront' : 'inform',
+        native: true, // kernel 五连判定：gate（当日确认）+ cap 8（confront）+ 持久去重
         surface: {
           kind: 'briefing',
           title: '⚠️ 经营风险提醒',
@@ -70,7 +67,7 @@ class RiskAlertService {
           ],
         },
       });
-      return 1;
+      return r.ok && !r.reason ? 1 : 0; // 仅真实播出计 1（queued/dedup/gate/quota 不计）
     } catch (e) {
       console.error('[risk-alert] 巡检失败:', e.message || e);
       return 0;

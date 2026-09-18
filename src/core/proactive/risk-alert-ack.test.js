@@ -1,31 +1,20 @@
 /**
- * risk-alert-ack.test.js — 风险告警用户确认（2026-09-06）
+ * risk-alert-ack.test.js — 风险告警用户确认（2026-09-06；2026-09-18 P0 集成化重写）
  *
  * 实机：应收逾期告警每 30 分钟巡检一次、proactive 去重窗口恰好也是 30 分钟 →
  * 同一告警全天重复播报；卡片"知道了"只清本地显示，无持久确认态 → "无法关闭"。
- * 修复：ack-store 按 trigger+内容哈希落盘当日确认，checkAndAlert 命中即跳过；
- * 内容变化（笔数/金额/客户）→ 文本变哈希变 → 自动恢复提醒。
+ * 修复：确认语义升级为 kernel gate 原语（2026-09-18 LoopX P0），本文件改为
+ * 集成测试——真实 index/kernel/ack-store 链路，仅 mock 广播与业务库扫描。
  */
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
-// ack-store / config 在 require 时读 CRABPAW_DATA_DIR——必须先于模块加载指向临时目录
+// ack-store / kernel 在首次使用时读 CRABPAW_DATA_DIR——必须先于模块加载指向临时目录
 const TMP_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'paw-ack-test-'));
 process.env.CRABPAW_DATA_DIR = TMP_DATA_DIR;
 
 jest.mock('../sse-broadcast', () => ({ broadcastEvent: jest.fn() }));
-// notify mock——断言"告警是否发出"用
-jest.mock('./index', () => ({
-  notify: jest.fn(() => ({ ok: true })),
-  init: jest.fn(),
-  isSilentHour: jest.fn(() => false),
-  getQueue: jest.fn(() => []),
-  flushQueue: jest.fn(() => []),
-  flushAndBroadcast: jest.fn(() => 0),
-  getCacheSize: jest.fn(() => 0),
-  getSilentEnd: jest.fn(() => 8),
-}));
 // 扫描结果 mock——不碰真实业务库
 jest.mock('./morning-briefing-service', () => ({
   scanBusinessRisks: jest.fn(),
@@ -34,7 +23,7 @@ jest.mock('./morning-briefing-service', () => ({
 const ackStore = require('./ack-store');
 const { RiskAlertService } = require('./risk-alert-service');
 const { scanBusinessRisks } = require('./morning-briefing-service');
-const { notify } = require('./index');
+const { broadcastEvent } = require('../sse-broadcast');
 
 const RISKS = {
   receivableOverdue: 1,
@@ -55,7 +44,7 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-describe('ack-store 当日确认存储', () => {
+describe('ack-store 当日确认存储（kernel gate 委托壳）', () => {
   test('ack 后同内容当日命中；跨天/内容变化自动失效', () => {
     expect(ackStore.isAckedToday('risk_alert', ALERT_TEXT)).toBe(false);
     ackStore.ack('risk_alert', ALERT_TEXT);
@@ -83,47 +72,43 @@ describe('ack-store 当日确认存储', () => {
   });
 });
 
-describe('RiskAlertService 确认后跳过', () => {
+describe('RiskAlertService × kernel gate 集成', () => {
   function freshService() {
-    // 每个用例新实例——绕开 _lastScan 30 分钟节流
     return new RiskAlertService();
   }
 
-  test('未确认 → 正常告警', async () => {
+  test('未确认 → 正常告警（proactive_speak 广播，confront 意图）', async () => {
     scanBusinessRisks.mockReturnValue(RISKS);
-    const svc = freshService();
-    const n = await svc.checkAndAlert({ businessDbPath: 'fake.db', today: '2026-09-06' });
+    const n = await freshService().checkAndAlert({ businessDbPath: 'fake.db', today: '2026-09-06' });
     expect(n).toBe(1);
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls[0][0].trigger).toBe('risk_alert');
+    expect(broadcastEvent).toHaveBeenCalledTimes(1);
+    expect(broadcastEvent.mock.calls[0][0]).toBe('proactive_speak');
+    expect(broadcastEvent.mock.calls[0][1]).toMatchObject({ trigger: 'risk_alert', intent: 'confront' });
   });
 
-  test('用户确认同内容 → 当日不再告警；确认状态与内容哈希绑定', async () => {
+  test('用户确认同内容 → 当日不再告警（gate 判定；推过去重窗证明是 gate 在拦）', async () => {
     scanBusinessRisks.mockReturnValue(RISKS);
-    const svc = freshService();
-    await svc.checkAndAlert({ businessDbPath: 'fake.db', today: '2026-09-06' });
+    await freshService().checkAndAlert({ businessDbPath: 'fake.db', today: '2026-09-06' });
     ackStore.ack('risk_alert', ALERT_TEXT);
-
-    const svc2 = freshService();
-    const n = await svc2.checkAndAlert({ businessDbPath: 'fake.db', today: '2026-09-06' });
+    // 推进 31 分钟：30min 去重窗已过期，此时拦截只可能来自 gate
+    jest.setSystemTime(new Date('2026-09-06T10:31:00+08:00'));
+    const n = await freshService().checkAndAlert({ businessDbPath: 'fake.db', today: '2026-09-06' });
     expect(n).toBe(0);
-    expect(notify).toHaveBeenCalledTimes(1); // 仍是首次那一条
+    expect(broadcastEvent).toHaveBeenCalledTimes(1); // 仍是首次那一条
   });
 
   test('数据变化（告警文本变化）→ 自动恢复提醒', async () => {
     ackStore.ack('risk_alert', ALERT_TEXT);
     scanBusinessRisks.mockReturnValue({ ...RISKS, receivableOverdue: 2, totalReceivable: 17600 });
-    const svc = freshService();
-    const n = await svc.checkAndAlert({ businessDbPath: 'fake.db', today: '2026-09-06' });
+    const n = await freshService().checkAndAlert({ businessDbPath: 'fake.db', today: '2026-09-06' });
     expect(n).toBe(1);
-    expect(notify).toHaveBeenCalledTimes(1);
+    expect(broadcastEvent).toHaveBeenCalledTimes(1);
   });
 
-  test('确认覆盖静默判断之前：零风险照旧不告警', async () => {
+  test('零风险照旧不告警', async () => {
     scanBusinessRisks.mockReturnValue({ receivableOverdue: 0, contractsExpiring: 0 });
-    const svc = freshService();
-    const n = await svc.checkAndAlert({ businessDbPath: 'fake.db', today: '2026-09-06' });
+    const n = await freshService().checkAndAlert({ businessDbPath: 'fake.db', today: '2026-09-06' });
     expect(n).toBe(0);
-    expect(notify).not.toHaveBeenCalled();
+    expect(broadcastEvent).not.toHaveBeenCalled();
   });
 });

@@ -125,7 +125,6 @@ function evaluateScenarios(context = {}) {
 class ScenarioReminderEngine {
   constructor() {
     this._timer = null;
-    this._lastEval = new Map(); // ruleId → lastTs
   }
 
   async evaluateNow({ city, schedules, holdings, stockBriefText } = {}) {
@@ -168,10 +167,17 @@ class ScenarioReminderEngine {
       const { notify } = require('./index');
       let count = 0;
       for (const h of hits) {
-        const last = this._lastEval.get(h.ruleId) || 0;
-        if (Date.now() - last < 60 * 60 * 1000) continue; // 同规则 1h 内不重复（叠加 notify 去重）
-        const r = notify({ trigger: `scenario_${h.ruleId}`, text: h.text, intent: h.intent });
-        if (r.ok) { this._lastEval.set(h.ruleId, Date.now()); count++; }
+        // 2026-09-18 LoopX P0 收编：同规则去重由 kernel 滑动窗承担（原 _lastEval 删除）。
+        // 提案级 1h 窗 + 滑动语义（30min 巡检下同规则实际最短约 90min 重播，防擦边
+        // 重复）；ambient 档静默必压、cap 3/日，持久化时重启去重/配额不丢。
+        const r = notify({
+          trigger: `scenario_${h.ruleId}`,
+          text: h.text,
+          intent: h.intent,
+          native: true,
+          dedupMs: 60 * 60 * 1000,
+        });
+        if (r.ok) count++;
       }
       return count;
     } catch (e) {

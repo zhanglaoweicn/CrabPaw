@@ -1208,8 +1208,9 @@ async function startServer(options = {}) {
       silentStart: 22,
       silentEnd: 8,
       dedupMs: 30 * 60 * 1000,
+      persist: true, // 2026-09-18 LoopX P0: 去重/配额/确认落盘 proactive-kernel.json，重启不丢
     })
-    console.log('📢 Proactive 规则通道已初始化（静默 22:00-08:00，去重 30min）')
+    console.log('📢 Proactive 规则通道已初始化（静默 22:00-08:00，去重 30min，状态持久化）')
   } catch (err) {
     console.error('[server] proactive 初始化失败:', err?.message || err)
   }
@@ -1436,9 +1437,18 @@ function setupCronHandlers(cron, ctx) {
       || null;
     console.log(`⏰ 提醒触发: [${channel}] -> ${target || 'default'} ${message}`);
 
+    try { // 外层兜底：任何未捕获异常 → {success:false}（保持原 handler 错误契约）
+
+    // 2026-09-18 LoopX P0: notify 决策结果此前被忽略——kernel 判定抑制（同内容去重/
+    // 当日确认 gate）时外部通道仍照发。改吃决策：
+    //   - speak → App 内播报 + 外部通道投递
+    //   - silent_hours → App 内入补播队列（守静默），外部通道仍投递——用户显式排程的
+    //     提醒按设定时刻到达（22:30 吃药提醒就该 22:30 推企微），不被静默压制
+    //   - dedup/gate/quota → 双路抑制（重复触发不二次打扰，"今日不再"生效）
+    let reminderVerdict = { ok: false, reason: 'error' }
     try {
       const proactive = require('../core/proactive')
-      proactive.notify({
+      reminderVerdict = proactive.notify({
         trigger: 'reminder',
         text: `提醒：${message}`,
         intent: 'inform',
@@ -1447,36 +1457,46 @@ function setupCronHandlers(cron, ctx) {
     } catch (err) {
       console.error('[server] proactive 接入失败:', err?.message || err)
     }
+    const deliverExternal = reminderVerdict.ok
+      && (!reminderVerdict.reason || reminderVerdict.reason === 'silent_hours')
+    if (!deliverExternal) {
+      console.log(`🔇 提醒被 kernel 判定抑制（${reminderVerdict.reason || 'unknown'}）: ${task.name || task.id}`)
+    }
 
-    try {
-      const formatted = formatWithCrab(`⏰ **提醒**\n\n${message}`);
+    if (deliverExternal) {
+      try {
+        const formatted = formatWithCrab(`⏰ **提醒**\n\n${message}`)
 
-      if (channel === 'wecom' && wecom) {
-        if (typeof wecom.sendSmart === 'function') {
-          await wecom.sendSmart(target, formatted, 'single', {});
-        } else if (typeof wecom.sendMarkdown === 'function') {
-          await wecom.sendMarkdown(target, formatted);
-        } else if (typeof wecom.send === 'function') {
-          await wecom.send(target, formatted);
+        if (channel === 'wecom' && wecom) {
+          if (typeof wecom.sendSmart === 'function') {
+            await wecom.sendSmart(target, formatted, 'single', {});
+          } else if (typeof wecom.sendMarkdown === 'function') {
+            await wecom.sendMarkdown(target, formatted);
+          } else if (typeof wecom.send === 'function') {
+            await wecom.send(target, formatted);
+          }
+        } else if (channel === 'lark' && lark) {
+          if (typeof lark.send === 'function') {
+            await lark.send(target, formatted);
+          } else if (typeof lark.sendMarkdown === 'function') {
+            await lark.sendMarkdown(target, formatted);
+          }
+        } else if (channel === 'both') {
+          if (wecom && typeof wecom.sendSmart === 'function') {
+            await wecom.sendSmart(target, formatted, 'single', {});
+          }
+          if (lark && typeof lark.send === 'function') {
+            await lark.send(target, formatted);
+          }
+        } else if (channel === 'none' || !channel) {
+          // P2-4: 无外部通道 → 提醒已通过上方 proactive.notify 在本机播报（应用内播报+通知卡）
+          console.log("✅ 提醒已在本机播报（无外部通道）: " + (task.name || task.id));
         }
-      } else if (channel === 'lark' && lark) {
-        if (typeof lark.send === 'function') {
-          await lark.send(target, formatted);
-        } else if (typeof lark.sendMarkdown === 'function') {
-          await lark.sendMarkdown(target, formatted);
-        }
-      } else if (channel === 'both') {
-        if (wecom && typeof wecom.sendSmart === 'function') {
-          await wecom.sendSmart(target, formatted, 'single', {});
-        }
-        if (lark && typeof lark.send === 'function') {
-          await lark.send(target, formatted);
-        }
-      } else if (channel === 'none' || !channel) {
-        // P2-4: 无外部通道 → 提醒已通过上方 proactive.notify 在本机播报（应用内播报+通知卡）
-        console.log("✅ 提醒已在本机播报（无外部通道）: " + (task.name || task.id));
+        console.log(`✅ 提醒已发送: ${task.name} -> ${target || 'default'}`)
+      } catch (sendErr) {
+        console.error(`❌ 提醒外部通道发送失败:`, sendErr.message);
       }
-      console.log(`✅ 提醒已发送: ${task.name} -> ${target || 'default'}`);
+    }
 
       // 一次性提醒：触发后即移除（cron 为每日模式，不移除会每日重复触发；此前缺 name/action 从不触发故未暴露）。
       // 内存 pause + 持久化删除双管齐下，只影响一次性提醒，不影响重复提醒与 wecom/lark 正常路径。
