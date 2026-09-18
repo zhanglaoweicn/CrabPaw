@@ -8,6 +8,7 @@ import https from 'https'
 import { crashReporter } from 'electron'
 import { parseWindowMode, applyWindowMode } from './window-mode'
 import { sanitizeConfigSetPayload } from './config-set-guard'
+import { registerWebBrowse, disposeWebBrowse } from './web-browse'
 
 let mainWindow: BrowserWindow | null = null
 let crabpawServer: ChildProcess | null = null
@@ -612,6 +613,8 @@ function createWindow() {
 
   // P5 fix: 窗口销毁（含 window:restart / 崩溃重建）时释放 powerSaveBlocker，防止重建窗口叠加 blocker 泄漏
   mainWindow.on('closed', () => {
+    // web-browse：窗口销毁时同步销毁访客视图（IPC 处理器保留，窗口重建后仍可用）
+    disposeWebBrowse(() => mainWindow)
     if (blockerId !== null) {
       powerSaveBlocker.stop(blockerId)
       console.log(`[kiosk] 窗口已关闭, powerSaveBlocker=${blockerId} 已释放`)
@@ -793,6 +796,9 @@ function setupCrashRecovery(webContents: any) {
     }
     return { action: 'deny' }
   })
+
+  // 应用内网页浏览面板（WebContentsView 承载访客页，S6 禁用 webviewTag 不受影响）
+  registerWebBrowse(() => mainWindow)
 
   // ── 关闭窗口 → 缩到托盘 ───────────────────────────
   mainWindow.on('close', (event) => {

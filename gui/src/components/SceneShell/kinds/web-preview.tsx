@@ -10,6 +10,9 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { getPerformanceMode } from '../../../lib/performance-mode'
+// 2026-09-18: 应用内浏览面板接线——iframe 被目标站 X-Frame-Options 拒嵌时，
+// 引导用户转 WebBrowsePanel（主进程 WebContentsView，不受嵌帧限制）
+import { WEBPANEL_OPEN_EVENT, isWebPanelNavigableUrl } from '../../../lib/web-browse'
 
 /* ─── 数据接口 ─── */
 export interface WebPreviewData {
@@ -193,6 +196,17 @@ function PourParticles({ active }: { active: boolean }) {
 }
 
 /* ─── WebPreviewCard ─── */
+// 应用内浏览面板打开（仅 http/https；local: 本地预览仍走 iframe）
+function openInWebBrowsePanel(url: string, title?: string) {
+  window.dispatchEvent(new CustomEvent(WEBPANEL_OPEN_EVENT, { detail: { url, title } }))
+}
+
+const PANEL_BTN_STYLE: React.CSSProperties = {
+  flexShrink: 0, padding: '3px 10px', borderRadius: '999px',
+  border: '1px solid rgba(99,102,241,0.35)', background: 'rgba(99,102,241,0.12)',
+  color: '#a5b4fc', fontSize: '10px', lineHeight: 1.4, cursor: 'pointer',
+}
+
 export function WebPreviewCard({ data, onClose }: { data?: WebPreviewData; onClose?: () => void }) {
   const [iframeLoading, setIframeLoading] = useState(true)
   const [iframeError, setIframeError] = useState(false)
@@ -348,6 +362,14 @@ export function WebPreviewCard({ data, onClose }: { data?: WebPreviewData; onClo
             <span style={{ fontSize: 9, color: '#666', maxWidth: '80%', textAlign: 'center', wordBreak: 'break-all' }}>
               该页面可能拒绝嵌入，或 sandbox 限制导致无法加载
             </span>
+            {isWebPanelNavigableUrl(data.url) && (
+              <button
+                type="button"
+                style={{ ...PANEL_BTN_STYLE, marginTop: '4px' }}
+                title="改用应用内浏览面板（不受网站嵌入限制）"
+                onClick={() => openInWebBrowsePanel(data.url, data.title)}
+              >🖥 用应用内浏览器打开</button>
+            )}
           </div>
         )}
 
@@ -368,13 +390,24 @@ export function WebPreviewCard({ data, onClose }: { data?: WebPreviewData; onClo
       {/* 海报浇筑粒子：仅当 pour 字段存在且为 true 时渲染 */}
       {data.pour && <PourParticles active={true} />}
 
-      {/* URL 底部标注 */}
-      <div style={{
-        fontSize: '8px', color: '#555', marginTop: '6px',
-        textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}>
-        {data.url}
+      {/* URL 底部标注 + 应用内打开入口（2026-09-18） */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+        {isWebPanelNavigableUrl(data.url) && (
+          <button
+            type="button"
+            title="在应用内浏览面板中打开（不受网站嵌入限制）"
+            style={PANEL_BTN_STYLE}
+            onClick={() => openInWebBrowsePanel(data.url, data.title)}
+          >🖥 应用内打开</button>
+        )}
+        <div style={{
+          flex: 1, minWidth: 0,
+          fontSize: '8px', color: '#555',
+          textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>
+          {data.url}
+        </div>
       </div>
     </div>
   )

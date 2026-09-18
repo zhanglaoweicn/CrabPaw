@@ -97,6 +97,14 @@ declare global {
       browser: {
         onOpenTab: (callback: (url: string) => void) => (() => void)
       }
+      webPanel: {
+        show: (url: string) => Promise<{ success: boolean; error?: string }>
+        hide: () => Promise<{ success: boolean; error?: string }>
+        close: () => Promise<{ success: boolean; error?: string }>
+        setBounds: (rect: { x: number; y: number; width: number; height: number }) => Promise<{ success: boolean; error?: string }>
+        action: (type: 'back' | 'forward' | 'reload' | 'stop' | 'open-external') => Promise<{ success: boolean; error?: string }>
+        onState: (callback: (state: { url: string; title: string; isLoading: boolean; canGoBack: boolean; canGoForward: boolean }) => void) => (() => void)
+      }
       splash: {
         onProgress: (callback: (event: SplashProgressEvent) => void) => (() => void) | undefined
         ready: () => void

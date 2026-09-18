@@ -196,6 +196,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => { ipcRenderer.removeListener('browser:open-tab', handler) }
     },
   },
+  webPanel: {
+    // 2026-09-18: 应用内网页浏览（主进程 WebContentsView，见 electron/main/web-browse.ts）
+    // 渲染层只上报矩形与动作，安全闸门全部在主进程（http/https 白名单/权限全拒/下载转发）
+    show: (url: string) => ipcRenderer.invoke('webpanel:show', validateString(url, 'url')),
+    hide: () => ipcRenderer.invoke('webpanel:hide'),
+    close: () => ipcRenderer.invoke('webpanel:close'),
+    setBounds: (rect: { x: number; y: number; width: number; height: number }) => {
+      const r = validateObject(rect, 'rect')
+      const num = (v: unknown, name: string): number => {
+        if (typeof v !== 'number' || !Number.isFinite(v)) {
+          throw new Error(`webPanel.setBounds.${name} 必须是有限数字`)
+        }
+        return v
+      }
+      return ipcRenderer.invoke('webpanel:set-bounds', {
+        x: num(r.x, 'x'), y: num(r.y, 'y'),
+        width: num(r.width, 'width'), height: num(r.height, 'height'),
+      })
+    },
+    action: (type: string) => ipcRenderer.invoke('webpanel:action', validateString(type, 'type')),
+    onState: (callback: (state: unknown) => void) => {
+      if (typeof callback !== 'function') throw new Error('Invalid callback: expected function')
+      const handler = (_: any, state: unknown) => callback(state)
+      ipcRenderer.on('webpanel:state', handler)
+      return () => { ipcRenderer.removeListener('webpanel:state', handler) }
+    },
+  },
   splash: {
     onProgress: (callback: (event: any) => void) => {
       if (typeof callback !== 'function') throw new Error('Invalid callback: expected function')

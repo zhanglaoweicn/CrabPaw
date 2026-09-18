@@ -17,6 +17,7 @@ import BusinessReportPanel from './components/BusinessReportPanel'
 import CommodityPanel from './components/CommodityPanel'
 import { SchedulePanel } from './components/SchedulePanel'
 import { KnowledgePanel } from './components/KnowledgePanel'
+import { WebBrowsePanel } from './components/WebBrowsePanel'
 import { SkillStageHost } from './components/SkillStageHost'
 import { ApprovalHost } from './components/ApprovalHost'
 import { SetupWizard } from './components/SetupWizard'
@@ -220,6 +221,8 @@ function App() {
         <SchedulePanel />
         {/* 2026-08-20: 知识库面板（常驻，语音「打开知识库」弹出检索/文档清单/SRS 复习） */}
         <KnowledgePanel />
+        {/* 2026-09-18: 应用内网页浏览面板（常驻；入口 = WebPreviewCard「应用内打开」按钮） */}
+        <WebBrowsePanel />
         {/* 2026-08-04: 技能执行全息卡（常驻） */}
         <SkillStageHost />
         {/* 2026-08-04: 全局审批宿主（常驻） */}

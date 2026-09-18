@@ -58,9 +58,10 @@ describe('useDraggable', () => {
     // 原点 100,100 → +300,+300 = 400,400 < 视口界, 原样生效
     startMove(panel, 100, 100, 400, 400)
     expect(onOffsetChange).toHaveBeenLastCalledWith({ x: 300, y: 300 })
-    // 超出右/下界 → 钳制到 vw-40 / vh-40 (1024-40, 768-40)
+    // 超出右/下界 → 钳制到 vw-48 / vh-48 (1024-48, 768-48)——对齐源码
+    // "下/右界保留 48px 可见条"(ade9700 改 40→48, 本测试此前漏更)
     startMove(panel, 0, 0, 5000, 5000)
-    expect(onOffsetChange).toHaveBeenLastCalledWith({ x: 1024 - 40, y: 768 - 40 })
+    expect(onOffsetChange).toHaveBeenLastCalledWith({ x: 1024 - 48, y: 768 - 48 })
     // 向左越界 → 钳制到 8-w (面板宽300 → -292), 8-h (120 → -112)
     startMove(panel, 100, 100, -9999, -9999)
     expect(onOffsetChange).toHaveBeenLastCalledWith({ x: 8 - 300, y: 8 - 120 })
