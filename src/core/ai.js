@@ -2922,7 +2922,11 @@ async function chatStreamImpl(config, skills, userId, message, onChunk, options 
  let streamMessage = message;
  try {
  const { detectTaskMode } = require('./task-mode-detector');
- const td = detectTaskMode(message);
+ // 2026-09-18 修复: 任务判定必须用"用户原文"——语音委托的 streamMessage 带
+ // 多行实时上下文脚手架, multiline+长度加分使每条语音委托都跨过任务阈值
+ // (实测 "帮我读一下" isTask:0.30 被注入 PlanCreate 指令 → 模型 1421 token
+ // 全留在 reasoning、正文空 → 回复生成失败)。rawUserMessage=剥脚手架原文。
+ const td = detectTaskMode(options.rawUserMessage || message);
  if (td.isTask && td.confidence > 0.25) {
  streamMessage = message + '\n\n[系统提示：这是一个多步任务。请先调用 PlanCreate 工具建立执行计划（传入标题与按顺序的步骤清单），随后每完成一个关键步骤调用 PlanUpdate 同步进度（status: done/running/failed），全部完成后正常作答。]';
  console.log('[task-mode] chatStream 多步任务命中, 已注入执行计划指令');
@@ -3421,7 +3425,7 @@ async function chatStreamImpl(config, skills, userId, message, onChunk, options 
  }
  }
 
- async function processWithStreaming(currentMessages, depth = 0) {
+ async function processWithStreaming(currentMessages, depth = 0, isEmptyRetry = 0) {
  // 2026-09-07 实测修复: 此处原为硬编码 `depth > 5` 强制终答——它位于 tool_choice
  // 分级与 filegen 收答保底轮的上游, 导致契约 finalAnswerRound 与保底轮从未执行
  // (13:20 轮实测 depth=6 直达此处, HTML 未落盘就收答)。改为与契约对齐:
@@ -4342,6 +4346,23 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
      return doneMsg;
    }
    // 退化回复：AI 返回空文本且无工具调用
+   // 2026-09-18 修复(语音委托实测): deepseek 推理模型可能把全部输出留在
+   // reasoning(实测 1421 token 全在 reasoning、content 空), 直接报错体验差。
+   // depth=0 且未重试过时追加"必须输出正文"指令重试一次, 仍空才报错。
+   if (!isEmptyRetry && depth === 0) {
+     console.warn('[流式] AI 空回复(输出可能全留在 reasoning)——追加正文指令重试一次');
+     const retryMessages = currentMessages.slice();
+     for (let i = retryMessages.length - 1; i >= 0; i--) {
+       if (retryMessages[i] && retryMessages[i].role === 'user') {
+         retryMessages[i] = {
+           ...retryMessages[i],
+           content: String(retryMessages[i].content || '') + '\n\n[系统提示] 上一轮未生成可见回复。请跳过任何思考过程复述，直接用一两句话在正文中回答用户最新请求。',
+         };
+         break;
+       }
+     }
+     return processWithStreaming(retryMessages, depth, 1);
+   }
    console.warn('[流式] AI 返回空回复且无工具调用 — 返回错误提示');
    const emptyMsg = '抱歉，AI 未返回有效回复。请尝试换一种方式描述您的需求，或稍后重试。';
    onChunk({ content: emptyMsg, done: true });
