@@ -23,7 +23,15 @@ function getToolTimeout(toolName) {
 }
 
 function filterSkillsByContext(skills, toolNames) {
+  // 2026-09-18 技能库治理: 禁用名单(5s 热读)在提示词层同样生效——此前仅执行层拦截
+  let disabled = null;
+  try {
+    const { getDisabledSkillNames } = require('./skills');
+    disabled = getDisabledSkillNames();
+  } catch (e) { /* skills 模块不可用时退化为不过滤 */ }
+  const disabledSet = disabled && disabled.length > 0 ? new Set(disabled.map(d => String(d).toLowerCase())) : null;
   return skills.filter(skill => {
+    if (disabledSet && disabledSet.has(String(skill.name).toLowerCase())) return false;
     if (skill.platformMismatch) return false;
     if (skill.available === false) return false;
     if (skill.requiresTools && skill.requiresTools.length > 0) {

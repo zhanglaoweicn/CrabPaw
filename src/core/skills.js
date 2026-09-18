@@ -358,6 +358,13 @@ function loadSkillsFromDir(skillsDir, source) {
     const skillMdPath = path.join(skillPath, 'SKILL.md');
     const configPath = path.join(skillPath, 'config.json');
 
+    // 2026-09-18 技能库治理: 无 SKILL.md 且无 config.json 的目录不是技能——分类
+    // 说明文档(core/、system/、development/、domain/ 的 DESCRIPTION.md)与嵌套
+    // 遗留(_builtin/、builtin-tools/)此前被注册成空描述壳技能, 污染候选清单
+    if (!fs.existsSync(skillMdPath) && !fs.existsSync(configPath)) {
+      continue;
+    }
+
     let skill = {
       name: skillName,
       description: '',
@@ -1049,7 +1056,33 @@ ${skillSections}
 ${renderSkillTail(skills)}`;
 }
 
-// ── P1-4: 技能清单按需注入（渐进披露） ─────────────────────────
+// 2026-09-18 技能库治理: 索引模式清单——"能力零回退"的紧凑形态。
+// 每技能一行(名称—用途)，不注入正文/调用命令；模型确定要用某技能时，
+// 按两根路径读 SKILL.md 获取执行方法(与 executeSkillAdvanced 的双根查找一致)。
+const INDEX_DESC_MAX_CHARS = 60;
+function buildSkillsIndexPrompt(skills) {
+  const lines = (skills || []).map(skill => {
+    const metaNs = skill.metadata || {};
+    const emoji = metaNs.crabpaw?.emoji || metaNs.openclaw?.emoji || metaNs.clawdbot?.emoji || '📦';
+    const desc = String(skill.description || '').replace(/\s+/g, ' ').trim();
+    const descShort = desc.length > INDEX_DESC_MAX_CHARS
+      ? desc.slice(0, INDEX_DESC_MAX_CHARS) + '…'
+      : (desc || '（无描述）');
+    return `- ${emoji} ${skill.name} — ${descShort}`;
+  });
+  return `
+# 可用技能（索引模式）
+
+当前消息未精确命中技能。以下为全部 ${skills.length} 个可用能力索引；确定要用某个技能时，先用 Read/Glob 定位并读取其 SKILL.md 获取执行方法，再执行。
+
+内置技能根: ${SKILLS_DIR}/<技能名>/SKILL.md
+用户技能根: ${GLOBAL_SKILLS_DIR}/<技能名>/SKILL.md
+
+${lines.join('\n')}
+`;
+}
+
+// P1-4: 技能清单按需注入（渐进披露） ─────────────────────────
 // 算法（披露）: message 与技能文本（name/displayName/description/category/tags）
 // 的 token 集合重叠度——ASCII 词（含 slug 拆分）+ 中文逐字符 bigram。
 // score = 0.6 × 覆盖率(|M∩S|/|M|) + 0.4 × Jaccard(|M∩S|/|M∪S|)。
@@ -1130,9 +1163,12 @@ function buildSkillsPromptScoped(message, skills, options = {}) {
     .filter(x => x.score >= cutoff && x.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  // 无命中 → 全量回退（能力零回退——设计不变式）
+  // 无命中 → 索引回退（能力零回退不变式：全部能力仍对模型可见——以紧凑索引
+  // 而非全量正文注入。2026-09-18 治理：原实现无命中即注入全部技能完整章节
+  // （实测 90 技能 16.4K 字符 ≈ 6.5K tokens，"把这张表做成图表"等日常短句即
+  // 触发）；索引模式一行一技能，模型确定要用某技能时按根路径读 SKILL.md。
   if (hits.length === 0) {
-    return buildSkillsPrompt(skills, limits);
+    return buildSkillsIndexPrompt(skills);
   }
 
   // 命中 + 同分类资源（同 category 技能一并注入补全上下文；general 为默认噪声分类不扩展）
@@ -1250,8 +1286,29 @@ function loadSkills() {
   }
   const builtin = loadSkillsFromDir(SKILLS_DIR, 'builtin');
   const global = loadSkillsFromDir(GLOBAL_SKILLS_DIR, 'global');
-  
-  const allSkills = [...Object.values(builtin), ...Object.values(global)];
+
+  // 2026-09-18 技能库治理: 跨根同名去重——市场安装/重装常与内置同名(实测
+  // deep-research、multi-search-engine 双胞胎同时入候选清单, 同一消息注入两份
+  // 不同说明书=指令打架)。优先级与执行层遮蔽规则(executeSkillAdvanced)对齐:
+  // 带执行器的副本优先, 双方都有/都无时内置优先(产品随包版本为权威)。
+  const builtinSkills = Object.values(builtin);
+  const builtinNames = new Set(builtinSkills.map(s => normalizeSkillName(s.name)));
+  const keptGlobal = [];
+  for (const s of Object.values(global)) {
+    const key = normalizeSkillName(s.name);
+    if (!builtinNames.has(key)) {
+      keptGlobal.push(s);
+      continue;
+    }
+    if (detectExecutorType(s.baseDir) && !detectExecutorType(path.join(SKILLS_DIR, s.name))) {
+      const bi = builtinSkills.findIndex(x => normalizeSkillName(x.name) === key);
+      if (bi >= 0) builtinSkills[bi] = s;
+      console.log(`📚 [技能去重] ${s.name}: 全局版带执行器, 替代内置版`);
+    } else {
+      console.log(`📚 [技能去重] ${s.name}: 与内置同名, 按内置优先跳过全局副本`);
+    }
+  }
+  const allSkills = [...builtinSkills, ...keptGlobal];
   
   const skills = allSkills.map(skill => ({
     name: skill.name,
@@ -1822,6 +1879,12 @@ function _loadDisabledSkillNames() {
   return _disabledSkillsCache || [];
 }
 
+// 2026-09-18 技能库治理: 禁用名单透出——提示词层(filterSkillsByContext)此前只在
+// 执行层拦禁用技能, 禁用项仍占提示词并可能误导模型调用后报错。5 秒缓存同源。
+function getDisabledSkillNames() {
+  return _loadDisabledSkillNames();
+}
+
 async function executeSkillAdvanced(skillName, input, context = {}) {
   _validateSkillName(skillName);
   // 2026-08-18 P1: 禁用技能检查(disabled-skills.json, 5s 缓存)
@@ -2005,8 +2068,11 @@ module.exports = {
   load,
   execute,
   loadSkills,
+  loadSkillsFromDir,
   buildSkillsPrompt,
   buildSkillsPromptScoped,
+  buildSkillsIndexPrompt,
+  getDisabledSkillNames,
   getEvolution,
   scanSkillSecurity,
   checkSkillDependencies,

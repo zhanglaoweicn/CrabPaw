@@ -138,7 +138,15 @@ if (process.env.NODE_ENV !== 'test') {
 // aiStreaming / toolExec / aiContext 暂未在 ai.js 中直接使用（子模块独立可测）
 
 function filterSkillsByContext(skills, toolNames) {
+ // 2026-09-18 技能库治理: 禁用名单(5s 热读)在提示词层同样生效——此前仅执行层拦截
+ let _disabledSet = null;
+ try {
+  const { getDisabledSkillNames } = require('./skills');
+  const _disabled = getDisabledSkillNames();
+  if (_disabled && _disabled.length > 0) _disabledSet = new Set(_disabled.map(d => String(d).toLowerCase()));
+ } catch (e) { /* skills 不可用时退化为不过滤 */ }
  return skills.filter(skill => {
+ if (_disabledSet && _disabledSet.has(String(skill.name).toLowerCase())) return false;
  if (skill.platformMismatch) return false;
  if (skill.available === false) return false;
 
