@@ -35,6 +35,7 @@ const SKILL_DISPLAY_NAMES = {
   'financial-analyst': { displayName: '📊 财务分析', category: '分析' },
   'summarize-pro': { displayName: '📝 摘要引擎', category: '文本处理' },
   'multi-search-engine': { displayName: '🔍 搜索引擎', category: '搜索' },
+  'folder-analyzer': { displayName: '🗂️ 文件夹结构分析', category: '系统' },
   'weather': { displayName: '🌤️ 天气查询', category: '信息查询' },
   'system-info': { displayName: '💻 系统信息', category: '系统' },
   'stock-analyst-enhanced': { displayName: '📈 股票分析', category: '分析' },

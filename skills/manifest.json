@@ -5,12 +5,9 @@
     "file-manager",
     "file-organizer",
     "browser-use",
-    "system",
     "system-info",
-    "core",
     "desktop-control",
     "windows-ui-automation",
-    "agent-browser",
     "doc-processor",
     "markdown-converter",
     "wechat-article-search",
@@ -26,12 +23,9 @@
         "file-manager",
         "file-organizer",
         "browser-use",
-        "system",
         "system-info",
-        "core",
         "desktop-control",
-        "windows-ui-automation",
-        "agent-browser"
+        "windows-ui-automation"
       ],
       "required": true
     },
@@ -44,7 +38,9 @@
         "pdf-generator",
         "doc-processor",
         "markdown-converter",
-        "report-generator"
+        "report-generator",
+        "html-presentation",
+        "presentation-builder"
       ],
       "required": true
     },
@@ -66,9 +62,12 @@
         "systematic-debugging",
         "test-driven-development",
         "api-tester",
-        "development",
         "skill-creator",
-        "prompt-engineering-expert"
+        "prompt-engineering-expert",
+        "html-generator",
+        "subagent-driven-dev",
+        "ui-ux-pro-max",
+        "writing-plans"
       ],
       "required": false
     },
@@ -80,7 +79,9 @@
         "price-monitor",
         "product-research",
         "weather",
-        "review-analyzer"
+        "review-analyzer",
+        "chart-generator",
+        "deep-research"
       ],
       "required": false
     },
@@ -101,9 +102,12 @@
         "healthcheck",
         "hot-now",
         "brainstorming",
-        "productivity",
         "remotion-video",
-        "hyperframes-video"
+        "hyperframes-video",
+        "folder-analyzer",
+        "diagram-generator",
+        "huo15-flow-chart",
+        "poster-designer"
       ],
       "required": false
     }
