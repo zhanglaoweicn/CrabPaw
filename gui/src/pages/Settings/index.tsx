@@ -282,26 +282,6 @@ const SettingsComponent = (props: SettingsProps, ref: React.Ref<SettingsHandle>)
     providers: DEFAULT_VISION_PROVIDERS as Record<string, { baseUrl: string; apiKey: string; model: string }>
   })
 
-  const [updateConfig, setUpdateConfig] = useState({
-    updateUrl: '',
-    autoCheck: true,
-    lastCheck: ''
-  })
-  
-  const [updateStatus, setUpdateStatus] = useState<{
-    checking: boolean
-    hasUpdate: boolean
-    latestVersion: string
-    currentVersion: string
-    error: string
-  }>({
-    checking: false,
-    hasUpdate: false,
-    latestVersion: '',
-    currentVersion: '1.0.0',
-    error: ''
-  })
-  
   const [backups, setBackups] = useState<Array<{
     name: string
     size: number
@@ -329,10 +309,10 @@ const SettingsComponent = (props: SettingsProps, ref: React.Ref<SettingsHandle>)
   const getConfigSnapshot = useCallback(() => {
     return JSON.stringify({
       modelConfig, userConfig, assistantConfig, larkConfig, wecomConfig,
-      chatChannel, securityConfig, voiceConfig, updateConfig, imageGenConfig, videoGenConfig, visionConfig,
+      chatChannel, securityConfig, voiceConfig, imageGenConfig, videoGenConfig, visionConfig,
       fallbackConfig, searchConfig
     })
-  }, [modelConfig, userConfig, assistantConfig, larkConfig, wecomConfig, chatChannel, securityConfig, voiceConfig, updateConfig, imageGenConfig, videoGenConfig, visionConfig, fallbackConfig, searchConfig])
+  }, [modelConfig, userConfig, assistantConfig, larkConfig, wecomConfig, chatChannel, securityConfig, voiceConfig, imageGenConfig, videoGenConfig, visionConfig, fallbackConfig, searchConfig])
 
   // 2026-08-19 审计修复(第二轮): 异步回调必须读最新渲染帧的快照——
   // loadConfigs().then 闭包捕获的是 R0 渲染帧的 getConfigSnapshot(useCallback 引用),
@@ -426,8 +406,7 @@ const SettingsComponent = (props: SettingsProps, ref: React.Ref<SettingsHandle>)
   const loadAppVersion = async () => {
     try {
       if (window.electronAPI?.app?.getVersion) {
-        const version = await window.electronAPI.app.getVersion()
-        setUpdateStatus(prev => ({ ...prev, currentVersion: version }))
+        await window.electronAPI.app.getVersion()
       }
     } catch (_e) {
 
@@ -580,14 +559,6 @@ const SettingsComponent = (props: SettingsProps, ref: React.Ref<SettingsHandle>)
             filesystemEnabled: config.security.filesystem?.enabled !== false,
             sessionIsolationEnabled: config.security.sessionIsolation?.enabled !== false,
             remoteInstallEnabled: config.security.remoteInstall?.enabled === true
-          }))
-        }
-        if (config.update) {
-          setUpdateConfig(prev => ({
-            ...prev,
-            updateUrl: config.update.url || '',
-            autoCheck: config.update.autoCheck !== false,
-            lastCheck: config.update.lastCheck || ''
           }))
         }
         if (config.imageGeneration) {
@@ -857,9 +828,6 @@ const SettingsComponent = (props: SettingsProps, ref: React.Ref<SettingsHandle>)
             }
           },
           update: {
-            url: updateConfig.updateUrl,
-            autoCheck: updateConfig.autoCheck,
-            lastCheck: updateConfig.lastCheck
           },
           imageGeneration: {
             provider: imageGenConfig.provider,
@@ -929,7 +897,7 @@ const SettingsComponent = (props: SettingsProps, ref: React.Ref<SettingsHandle>)
     } finally {
       setSaving(false)
     }
-  }, [saving, modelConfig, larkConfig, wecomConfig, userConfig, assistantConfig, chatChannel, securityConfig, updateConfig, imageGenConfig, videoGenConfig, visionConfig, voiceConfig, searchConfig])
+  }, [saving, modelConfig, larkConfig, wecomConfig, userConfig, assistantConfig, chatChannel, securityConfig, imageGenConfig, videoGenConfig, visionConfig, voiceConfig, searchConfig])
   // 2026-09-10 U盘验收: 依赖数组曾漏 searchConfig——用户填写的百度 key 不进保存闭包,
   // POST 永远带空值, 后端"空值保留旧值"保护使 key 永远存不进(显示保存成功但为空)。
   // eslint react-hooks/exhaustive-deps 未拦截(规则未启), 建议后续开启。
@@ -1159,77 +1127,6 @@ const SettingsComponent = (props: SettingsProps, ref: React.Ref<SettingsHandle>)
     }
   }
 
-  const checkForUpdate = async () => {
-    if (!updateConfig.updateUrl) {
-      toast.error('请先填写更新地址')
-      return
-    }
-
-    setUpdateStatus(prev => ({ ...prev, checking: true, error: '' }))
-    
-    try {
-      const response = await fetch(`${updateConfig.updateUrl}/version.json`, {
-        signal: AbortSignal.timeout(10000)
-      })
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      
-      const data = await response.json()
-      const latestVersion = data.version || '0.0.0'
-      const currentVersion = updateStatus.currentVersion
-      
-      const hasUpdate = compareVersions(latestVersion, currentVersion) > 0
-      
-      setUpdateStatus(prev => ({
-        ...prev,
-        checking: false,
-        hasUpdate,
-        latestVersion,
-        error: ''
-      }))
-      
-      setUpdateConfig(prev => ({
-        ...prev,
-        lastCheck: new Date().toISOString()
-      }))
-      
-      if (hasUpdate) {
-        toast.success(`发现新版本 ${latestVersion}`)
-      } else {
-        toast.success('已是最新版本')
-      }
-    } catch (e: any) {
-      setUpdateStatus(prev => ({
-        ...prev,
-        checking: false,
-        error: e.message || '检查更新失败'
-      }))
-      toast.error('检查更新失败: ' + String(e))
-    }
-  }
-
-  const compareVersions = (a: string, b: string): number => {
-    const clean = (v: string) => v.replace(/^v/i, '').replace(/-.*$/, '')
-    const partsA = clean(a).split('.').map(p => parseInt(p, 10) || 0)
-    const partsB = clean(b).split('.').map(p => parseInt(p, 10) || 0)
-    
-    for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-      const numA = partsA[i] || 0
-      const numB = partsB[i] || 0
-      if (numA > numB) return 1
-      if (numA < numB) return -1
-    }
-    return 0
-  }
-
-  const downloadUpdate = () => {
-    if (updateConfig.updateUrl) {
-      window.open(`${updateConfig.updateUrl}/download`, '_blank')
-    }
-  }
-
   if (isRefreshing) {
     return (
       <div className="flex flex-col">
@@ -1436,7 +1333,7 @@ const SettingsComponent = (props: SettingsProps, ref: React.Ref<SettingsHandle>)
 
         <VoiceSection activeSection={activeSection} voiceConfig={voiceConfig} setVoiceConfig={setVoiceConfig} micDevices={micDevices} audioOutputs={audioOutputs} onRefreshDevices={refreshDevices} />
 
-        <UpdateSection activeSection={activeSection} updateConfig={updateConfig} setUpdateConfig={setUpdateConfig} updateStatus={updateStatus} onCheckUpdate={checkForUpdate} onDownloadUpdate={downloadUpdate} />
+        <UpdateSection activeSection={activeSection} />
 
         <div style={{ display: activeSection === 'backup' ? 'block' : 'none' }}>
           <SettingsBackup

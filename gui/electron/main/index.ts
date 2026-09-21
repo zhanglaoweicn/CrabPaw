@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, nativeImage, net, protocol, Tray, Menu, session, powerSaveBlocker, Notification } from 'electron'
 import path from 'path'
+import { registerUpdaterIpc } from './updater'
 import crypto from 'crypto'
 import fs from 'fs'
 import { spawn, ChildProcess } from 'child_process'
@@ -2555,6 +2556,9 @@ function getConfiguredUpdateOrigin(): string | null {
     return null
   }
 }
+
+// ── 2026-09-22: 应用内一键更新（GitHub Releases，见 ./updater.ts）──
+registerUpdaterIpc()
 
 ipcMain.handle('app:checkUpdate', async (_, updateUrl: string) => {
   // TODO(E10): Implement trusted auto-update with code signing verification (e.g., electron-updater with signature validation)

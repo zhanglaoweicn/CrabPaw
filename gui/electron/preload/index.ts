@@ -169,6 +169,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       getPath: () => ipcRenderer.invoke('app:boot-music:path'),
     },
   },
+  updater: {
+    check: () => ipcRenderer.invoke('updater:check'),
+    download: (payload: { downloadUrl: string; assetSize: number; assetName?: string }) =>
+      ipcRenderer.invoke('updater:download', payload),
+    apply: () => ipcRenderer.invoke('updater:apply'),
+    onProgress: (callback: (p: { percent: number; downloadedMb: number; totalMb: number }) => void) => {
+      const handler = (_e: unknown, payload: { percent: number; downloadedMb: number; totalMb: number }) => callback(payload)
+      ipcRenderer.on('updater:progress', handler)
+      return () => { ipcRenderer.removeListener('updater:progress', handler) }
+    },
+  },
   voice: {
     play: (filePath: string) => ipcRenderer.invoke('voice:play', validateString(filePath, 'filePath')),
     stop: () => ipcRenderer.invoke('voice:stop'),

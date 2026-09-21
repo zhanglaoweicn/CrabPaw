@@ -83,6 +83,26 @@ declare global {
           getPath: () => Promise<string | null>
         }
       }
+      updater: {
+        check: () => Promise<{
+          success: boolean
+          hasUpdate?: boolean
+          currentVersion?: string
+          latestVersion?: string
+          assetName?: string | null
+          assetSize?: number
+          downloadUrl?: string | null
+          notes?: string
+          error?: string
+        }>
+        download: (payload: { downloadUrl: string; assetSize: number; assetName?: string | null }) => Promise<{
+          success: boolean
+          batPath?: string
+          error?: string
+        }>
+        apply: () => Promise<{ success: boolean; error?: string }>
+        onProgress: (callback: (p: { percent: number; downloadedMb: number; totalMb: number }) => void) => (() => void) | undefined
+      }
       voice: {
         play: (filePath: string) => Promise<boolean>
         stop: () => Promise<boolean>
