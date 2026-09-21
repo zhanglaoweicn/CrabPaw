@@ -30,10 +30,15 @@ export function aggregatePeriodMetrics(byDay: UsageDay[] | undefined, period: Us
   const days = Array.isArray(byDay) ? byDay : []
   if (days.length === 0) return { tokens: 0, cost: 0, requests: 0, cacheSavings: 0 }
 
+  // 本地日键（2026-09-21 与后端 localDayKey 对齐）：旧 toISOString UTC 键在
+  // 北京时间 0-8 点把"今日/本周"窗口整体错位一天，早晨看成本全落昨天。
   const today = new Date()
-  const todayStr = today.toISOString().split('T')[0]
+  const localDayKey = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const todayStr = localDayKey(today)
   const monthPrefix = todayStr.slice(0, 7)
-  const weekStart = new Date(today.getTime() - 6 * 86400000).toISOString().split('T')[0]
+  const weekStartDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6)
+  const weekStart = localDayKey(weekStartDate)
 
   const filtered = days.filter((d) => {
     if (!d.date) return period === 'all'

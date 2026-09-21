@@ -32,6 +32,18 @@ const DEFAULT_USAGE = {
 
 const CACHE_DISCOUNT_RATIO = 0.5;
 
+// 本地时区日键（YYYY-MM-DD）。此前写入/读取都用 toISOString() 取 UTC 键：
+// 北京时间 0-8 点的调用被记入"昨天"，月初前 8 小时被记入"上月末"，
+// 早晨看经营数据直接错数（2026-09-21 修复）。
+// 历史 byDay 键为 UTC 口径，不做迁移——UTC 键横跨本地两日，无损迁移不可能；
+// 旧键在月份前缀聚合中仍正确计入，在"今日/近 N 天"中随窗口自然推出。
+function localDayKey(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 const MODEL_PRICING = {
   'deepseek-chat': { prompt: 0.0001, completion: 0.0002, cache: 0.00001 },
   'deepseek-coder': { prompt: 0.0001, completion: 0.0002, cache: 0.00001 },
@@ -269,8 +281,8 @@ function recordUsage(provider, model, usage, options = {}) {
   stats.byModel[modelKey].estimatedCost += cost;
   stats.byModel[modelKey].cacheSavings = (stats.byModel[modelKey].cacheSavings || 0) + cacheSavings;
 
-  // 5. byDay
-  const today = new Date().toISOString().split('T')[0];
+  // 5. byDay（本地日键，口径见 localDayKey 注释）
+  const today = localDayKey();
   if (!stats.byDay[today]) {
     stats.byDay[today] = {
       requests: 0,
@@ -310,7 +322,7 @@ function getUsageStats() {
 
 function getTodayUsage() {
   const stats = loadUsage();
-  const today = new Date().toISOString().split('T')[0];
+  const today = localDayKey();
   return stats.byDay[today] || {
     requests: 0,
     promptTokens: 0,
@@ -323,11 +335,12 @@ function getTodayUsage() {
 function getRecentUsage(days = 7) {
   const stats = loadUsage();
   const result = [];
-  
+
+  // 本地日历天回推（setDate 毫秒回推在 DST 边界会漂移；中国无 DST 但仍用日历运算更稳）
+  const now = new Date();
   for (let i = 0; i < days; i++) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-    const dateStr = date.toISOString().split('T')[0];
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const dateStr = localDayKey(d);
     
     result.push({
       date: dateStr,
@@ -381,6 +394,8 @@ class UsageBudget {
 
   checkMonthlyBudget() {
     const stats = loadUsage();
+    // 月键本就用本地时区（getFullYear/getMonth）——byDay 日键改本地口径后两者一致；
+    // 历史 UTC 键靠月份前缀匹配天然兼容。
     const now = new Date();
     const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     let monthlyCost = 0;
@@ -507,6 +522,7 @@ class UsageReporter {
 }
 
 module.exports = {
+  localDayKey,
   normalizeUsageFields,
   recordUsage,
   getUsageStats,

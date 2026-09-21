@@ -59,6 +59,7 @@ const _localKnowledge = require('../handlers/local-handlers/knowledge-handler');
 const _localVision = require('../handlers/local-handlers/vision');
 const _localTasks = require('../handlers/local-handlers/tasks');
 const _localCockpit = require('../handlers/local-handlers/cockpit');
+const _localBriefing = require('../handlers/local-handlers/briefing-handler');
 const { createSessionHandlers } = require('./handlers/session-handlers');
 const { createProjectHandlers } = require('./handlers/project-handlers');
 const PUBLIC_ROUTES_BY_METHOD = {
@@ -383,6 +384,8 @@ const ROUTE_TABLE = [
   { method: 'GET', pattern: /^\/api\/panels\/state$/, handler: 'handlePanelStateGet' },
   { method: 'POST', pattern: /^\/api\/panels\/state$/, handler: 'handlePanelStateSet' },
   { method: 'GET', pattern: /^\/api\/cockpit\/overview$/, handler: 'handleCockpitOverview' },
+  // 2026-09-21 晨报带: VoiceShell 零输入信息层(营收/风险/日程单端点聚合)
+  { method: 'GET', pattern: /^\/api\/briefing\/today$/, handler: 'handleBriefingToday' },
   { method: 'DELETE', pattern: /^\/api\/usage$/, handler: 'handleUsageReset' },
   { method: 'GET', pattern: /^\/api\/audit$/, handler: 'handleAuditLogs' },
   { method: 'GET', pattern: /^\/api\/audit\/stats$/, handler: 'handleAuditStats' },
@@ -614,6 +617,7 @@ Object.assign(LOCAL_HANDLERS, _localKnowledge);
 // SceneShell 界面自检 POST /api/vision/verify 恒 404。补注入。
 Object.assign(LOCAL_HANDLERS, _localVision);
 Object.assign(LOCAL_HANDLERS, _localCockpit);
+Object.assign(LOCAL_HANDLERS, _localBriefing);
 function resolveRoute(method, pathname) {
   const methodRoutes = ROUTE_TABLE_BY_METHOD[method];
   if (!methodRoutes) return null;

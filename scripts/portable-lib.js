@@ -25,6 +25,15 @@ const GLOBAL_PATTERNS = [
   /\.pytest_cache/,
   /(^|\/)node_modules\/\.cache($|\/)/,
   /(^|\/)\.bin($|\/)/,
+  // 密钥/凭据(2026-09-21): data 整拷会把开发机密钥带进发行包, 门禁兜底拦截。
+  // .api_keys.json 含真实模型 API key(+时间戳 backup 变体), .keystore 是凭据库,
+  // .api_token 是本地 API 鉴权令牌——任何路径命中即 fail, 与 extraResources filter 互防。
+  // (GLOBAL 只放文件名字面量模式: 第三方包不存在这些名字, 不会误伤; 运行数据类
+  //  目录/文件名在第三方包里合法常见, 放 SOURCE_TREE 只拦我们自己的源码树。)
+  /(^|\/)\.api_keys\.json/,
+  /(^|\/)\.keystore$/,
+  /(^|\/)\.api_token$/,
+  /(^|\/)\.api_port$/,
   // 根 node_modules(资源树)的 dev 工具包——与 gui/package.json T4 filter 互防;
   // 锚定 ^resources/node_modules/: 嵌套 @types/jest 等同名包属第三方自己依赖, 放行
   /^resources\/node_modules\/(jest|@types|@babel|eslint|prettier|typescript|vite|vitest|electron|@electron|electron-builder|electron-packager|electron-icon-builder|@vitejs|playwright|@playwright|jsdom|ts-node|tsx|concurrently|wait-on|postcss|tailwindcss|autoprefixer|@testing-library|@tailwindcss|@typescript-eslint)(\/|$)/,
@@ -34,6 +43,13 @@ const SOURCE_TREE_PATTERNS = [
   /\.spec\.(js|ts)$/,
   /\.map$/,
   /\.(log|db|db-shm|db-wal)$/,
+  // 用户运行时数据(2026-09-21, 隐私+体积): 协作会话/检查点/业务注册表/审计/
+  // 用量/配置实体均属开发机运行残留, 发行种子不应携带(首启播种本就排除它们)。
+  // 放 SOURCE_TREE 而非 GLOBAL: collabs/backups/config.json 等名字在第三方
+  // npm 包内合法常见, 对 node_modules 应用会误伤数万条目。
+  /(^|\/)(collabs|checkpoints|assessment|backups|business)($|\/)/,
+  /(^|\/)(usage-stats|audit-log|awakening-cache|expert-stats)\.json$/,
+  /(^|\/)config\.json(\..*)?$/,
 ]
 const VIOLATION_PATTERNS = [...GLOBAL_PATTERNS, ...SOURCE_TREE_PATTERNS]
 

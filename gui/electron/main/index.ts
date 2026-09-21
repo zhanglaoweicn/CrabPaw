@@ -193,6 +193,10 @@ function ensureDataDir() {
     if (fs.existsSync(defaultDataDir)) {
       try {
         // Exclude dev environment remnants and user-generated data
+        // 2026-09-21 补密钥/运行数据: .keystore(凭据库)与 .api_keys.json.backup.*
+        // (带时间戳后缀, 走下方前缀判断)此前漏排——发行包种子携带开发机密钥,
+        // 播种会把它们拷进新用户数据目录; collabs/checkpoints/assessment/business
+        // 是运行时业务/会话数据, 同属不应播种的残留。
         const EXCLUDE_DIRS = new Set([
           'logs', 'generated-images', 'generated-videos', 'tts-output',
           'enterprise-cache', 'enterprise-scores', 'stock-evolution',
@@ -200,6 +204,7 @@ function ensureDataDir() {
           'watchdog', 'trajectories', 'kanban', 'analysis', 'reviews', 'metrics',
           'curator', 'composition', 'memory-snapshot', 'stability-reports',
           'backups', '.crabpaw', 'workspace',
+          'collabs', 'checkpoints', 'assessment', 'business',
           // 2026-08-19 发行审计 W9: ~400MB CloakBrowser 运行时直接读
           // resources/data/cloakbrowser(browser-control/index.js:15), 无需首启拷贝;
           // 此前整体复制进用户数据目录造成首启翻倍磁盘+慢首启。
@@ -209,9 +214,10 @@ function ensureDataDir() {
           'history.db', 'history.db-shm', 'history.db-wal',
           'onboarding.json', 'patterns.json', 'skill-lifecycle.json', 'skill-usage.json',
           'crabpaw.log', 'crash.log', '.api_keys.json', '.api_port', '.api_token',
-          '.wecom_bridge.pid', '.wecom_send_port', 'lark-status.json', 'wecom-status.json',
+          '.keystore', '.wecom_bridge.pid', '.wecom_send_port', 'lark-status.json', 'wecom-status.json',
           'audit-log.json', 'calendar.json', 'schedule.json', 'schedules.json',
           'skill-content-cache.json', 'skill-trajectory.json', 'usage-stats.json',
+          'awakening-cache.json', 'expert-stats.json',
           'fts-memory.db', 'unified-memory.db', 'skill-quality.db', 'skill-versions.db',
           'config-evolution.json', 'evolution-feedback.json', 'evolution-system.json',
           'memory-evolution.json', 'plugins-data.json', 'security-policy.yaml',
@@ -222,6 +228,7 @@ function ensureDataDir() {
         for (const item of items) {
           if (item.isDirectory() && EXCLUDE_DIRS.has(item.name)) continue
           if (item.isFile() && EXCLUDE_FILES.has(item.name)) continue
+          if (item.isFile() && item.name.startsWith('.api_keys.json.')) continue
           const src = path.join(defaultDataDir, item.name)
           const dest = path.join(DATA_DIR, item.name)
           if (!fs.existsSync(dest)) {

@@ -1,5 +1,5 @@
 const { sendJson } = require('./http-utils');
-const { getUsageStats, getTodayUsage, getRecentUsage, resetUsage } = require('../core/usage-stats');
+const { getUsageStats, getTodayUsage, getRecentUsage, resetUsage, localDayKey } = require('../core/usage-stats');
 
 /**
  * 将后端 usage-stats 数据格式转换为前端 CostDashboard 期望的格式
@@ -53,8 +53,8 @@ function transformForFrontend(data) {
     data.totalRequests = data.total.requests || 0;
     data.totalCacheSavings = data.total.cacheSavings || 0;
 
-    // 今日成本
-    const today = new Date().toISOString().split('T')[0];
+    // 今日成本（本地日键——旧 UTC 键在 0-8 点会把今天记成昨天）
+    const today = localDayKey();
     const todayData = Array.isArray(data.byDay)
       ? data.byDay.find(d => d.date === today)
       : null;
@@ -98,7 +98,7 @@ async function handleUsageStats(req, res, ctx) {
     if (period === 'today') {
       data = {
         total: raw.total,
-        byDay: { [new Date().toISOString().split('T')[0]]: getTodayUsage() },
+        byDay: { [localDayKey()]: getTodayUsage() },
         byModel: raw.byModel,
         byProvider: raw.byProvider,
       };

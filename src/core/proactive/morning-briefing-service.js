@@ -8,6 +8,8 @@
 const fs = require('fs');
 const path = require('path');
 const { listTables } = require('../business-data-registry');
+// 本地日键——与 usage-stats P0-1 修复同口径（旧 toISOString UTC 键 0-8 点错日）
+const { localDayKey } = require('../usage-stats');
 
 /** 只读执行 SQLite 查询（better-sqlite3，查询失败返回 null） */
 function safeQuery(dbPath, sql, params = []) {
@@ -256,12 +258,12 @@ function prevMonthRange(today) {
  * 本月/上月营收 + 环比 + 昨日营收 + 风险摘要（复用 scanBusinessRisks）。
  */
 function buildBriefingSnapshot(dbPath, { today } = {}) {
-  const t = today || new Date().toISOString().slice(0, 10);
+  const t = today || localDayKey();
   const monthStart = `${t.slice(0, 8)}01`;
   const prev = prevMonthRange(t);
   const yesterdayDate = new Date(t);
   yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-  const yesterday = yesterdayDate.toISOString().slice(0, 10);
+  const yesterday = localDayKey(yesterdayDate);
   const month = sumRevenueInRange(dbPath, monthStart, t);
   const prevMonth = sumRevenueInRange(dbPath, prev.start, prev.end);
   const yday = sumRevenueInRange(dbPath, yesterday, yesterday);

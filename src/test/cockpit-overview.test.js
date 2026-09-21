@@ -3,7 +3,10 @@
 jest.mock('../core/usage-stats', () => {
   // 动态今天键: 硬编码日期会在月份过后使 byDay 断言恒 0 失去验证力。
   // 键在工厂内计算(jest.mock 工厂禁引用外部变量, 且可读性优于 mock 前缀命名)。
-  const todayKey = new Date().toISOString().split('T')[0];
+  // 2026-09-21: cockpit 读侧改本地日键(localDayKey), 测试键口径同步——
+  // 仍用 UTC 键会在 0-8 点(UTC+8)与本地键错位, byDay 断言恒 0。
+  const now = new Date();
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   return {
     getUsageStats: jest.fn(() => ({
       total: { estimatedCost: 88, requests: 5 },
@@ -11,6 +14,7 @@ jest.mock('../core/usage-stats', () => {
       byModel: {}, byProvider: {}, byType: {},
     })),
     getTodayUsage: jest.fn(() => ({ estimatedCost: 5.5 })),
+    localDayKey: jest.fn(() => todayKey),
     getRecentUsage: jest.fn(() => []),
     resetUsage: jest.fn(),
   };

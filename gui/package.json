@@ -177,7 +177,25 @@
           "!**/tmp_pip/**",
           "!**/tmp_*",
           "!**/jarvis-candidates/**",
-          "!**/backup.log"
+          "!**/backup.log",
+          "!**/.api_keys.json",
+          "!**/.api_keys.json.*",
+          "!**/.keystore",
+          "!**/.api_token",
+          "!**/.api_port",
+          "!**/.instance.lock",
+          "!**/.wecom_bridge.pid",
+          "!**/.wecom_send_port",
+          "!**/collabs/**",
+          "!**/checkpoints/**",
+          "!**/assessment/**",
+          "!**/backups/**",
+          "!**/business/**",
+          "!**/usage-stats.json",
+          "!**/awakening-cache.json",
+          "!**/expert-stats.json",
+          "!**/config.json",
+          "!**/config.json.*"
         ]
       },
       {

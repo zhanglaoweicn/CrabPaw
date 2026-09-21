@@ -14,6 +14,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const { getCrabPawSubDir } = require('../path-utils');
+const { localDayKey } = require('../usage-stats');
 
 class InsightsEngine {
   constructor(dbPath) {
@@ -399,11 +400,12 @@ class InsightsEngine {
     
     for (const s of sessions) {
       if (!s.started_at) continue;
-      
+
       const dt = new Date(s.started_at * 1000);
       const day = dt.getDay();
       const hour = dt.getHours();
-      const dateStr = dt.toISOString().split('T')[0];
+      // 本地日键——与上面 getDay/getHours 同口径（旧 toISOString UTC 键在 0-8 点落错一天）
+      const dateStr = localDayKey(dt);
       
       dayCounts[day] = (dayCounts[day] || 0) + 1;
       hourCounts[hour] = (hourCounts[hour] || 0) + 1;

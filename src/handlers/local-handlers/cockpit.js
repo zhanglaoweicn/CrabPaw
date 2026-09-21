@@ -47,9 +47,9 @@ async function handleCockpitOverview(req, res, _ctx) {
   });
 
   const usage = await grab('usage', async () => {
-    const { getUsageStats, getTodayUsage } = require('../../core/usage-stats');
+    const { getUsageStats, getTodayUsage, localDayKey } = require('../../core/usage-stats');
     const raw = getUsageStats();
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDayKey();
     const byDay = raw.byDay || {};
     const monthPrefix = today.slice(0, 7);
     const monthCostCny = Object.entries(byDay)

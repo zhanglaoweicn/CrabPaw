@@ -2857,3 +2857,68 @@ body.side-sheet-media .voice-shell[data-layout='simple'] .voice-shell-chat-col {
 @media (prefers-reduced-motion: reduce) {
   .voice-shell::before { animation: none; }
 }
+
+/* ── 2026-09-21 创新-B: 结构化决策卡(对话流内, 例会/圆桌会收口) ── */
+.chatcard-decision {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chatcard-decision-head {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #ffd54f;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 213, 79, 0.25);
+}
+.chatcard-decision-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.chatcard-decision-tasks-title {
+  font-size: 11px;
+  opacity: 0.55;
+  margin-bottom: 2px;
+}
+.chatcard-decision-task {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.chatcard-decision-task-owner {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: rgba(92, 107, 192, 0.35);
+  color: #c5cae9;
+  white-space: nowrap;
+}
+.chatcard-decision-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+.chatcard-decision-action {
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.chatcard-decision-action:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.28);
+}

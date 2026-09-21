@@ -5,12 +5,12 @@
  */
 import { aggregatePeriodMetrics, type UsageDay } from './usage-period'
 
-/** 相对今天生成日期串(YYYY-MM-DD, UTC——与 usage-period.ts 实现口径一致:
- *  实现用 toISOString 比较, 本地时区字符串会因时差落错窗口) */
+/** 相对今天生成日期串(YYYY-MM-DD, 本地时区——2026-09-21 与 usage-period.ts 实现
+ *  口径一致: 实现已改本地日键, 旧 UTC 口径会在 0-8 点落错窗口) */
 function dstr(daysAgo: number): string {
   const d = new Date()
-  d.setUTCDate(d.getUTCDate() - daysAgo)
-  return d.toISOString().split('T')[0]
+  d.setDate(d.getDate() - daysAgo)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 const DAYS: UsageDay[] = [

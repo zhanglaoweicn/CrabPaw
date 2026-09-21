@@ -59,6 +59,7 @@ const auditVisibility = require('./test-cases/audit-visibility');
 const seamRoles = require('./test-cases/seam-roles');
 const expertOrg = require('./test-cases/expert-org');
 const agentLoop = require('./test-cases/agent-loop');
+const bossExperience = require('./test-cases/boss-experience');
 
 module.exports = {
   suites: [
@@ -73,5 +74,6 @@ module.exports = {
     voiceSession, checkpointStore, ttsChunk, workflowParallel, uiFarfield,
     mcpSecurity, runStore, uiControlTools, wiringInvariants, siteKnowledgePack,
     capabilityMap, planArtifact, auditVisibility, seamRoles, expertOrg, agentLoop,
+    bossExperience,
   ],
 };

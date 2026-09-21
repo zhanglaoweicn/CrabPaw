@@ -20,6 +20,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AmbientGlow } from '../../components/AmbientGlow'
+import { MorningBriefingStrip } from '../../components/MorningBriefingStrip'
+import { TodayOutputRail } from '../../components/TodayOutputRail'
+// ── 2026-09-21 P2-1 拆分: 语音配置域/对话类型/单条消息渲染移出主文件 ──
+import {
+  SHELL_VOICE_KEY, SHELL_VOICE_DEFAULTS, ShellVoiceConfig,
+  normalizeVoiceSection, voiceSectionForShell, fetchConfigForShell,
+} from './shellVoiceConfig'
+import type { ChatMsg, ChatMsgFile, RtSpeaker, RtDecisionCard, FlowToolEvent } from './types'
+import { ChatMessageItem, chatMarkdownLink } from './ChatMessages'
 import TaskOrbit from '../../components/TaskOrbit'
 import { HoloDissolve } from '../../components/HoloDissolve'
 import { SceneSurfaceRenderer } from '../../components/SceneShell'
@@ -45,7 +54,7 @@ import { ShellFloatCard } from '../../components/ShellFloatCard'
 import { sweepCompositorDeferred } from '../../lib/compositor'
 import { HeartbeatCard } from '../../components/HeartbeatCard'
 import { SysInfoCard } from '../../components/SysInfoCard'
-import { fileUrlFor, isImageAttachment, formatFileSize } from '../../lib/attachment'
+import { fileUrlFor } from '../../lib/attachment'
 import { isCardWallKind, loadDismissedKeys, saveDismissedKeys } from '../../lib/surface-utils'
 import { subscribeSse } from '../../lib/sse-hub'
 import { useRoundtableMeetings, rtDeptColor, type RtStatement, type RtIntervention, type RtConclusion, type RtDocument } from '../../hooks/useRoundtable'
@@ -78,16 +87,8 @@ import './styles.css'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-// Markdown 链接组件: 新窗口打开(react-markdown 默认 <a> 在同一窗口覆盖会话)
-function chatMarkdownLink(props: { href?: string; children?: React.ReactNode }) {
-  return (
-    <a href={props.href} target="_blank" rel="noopener noreferrer">
-      {props.children}
-    </a>
-  )
-}
-
-const SHELL_VOICE_KEY = 'crabpaw_shell_voice'
+// 2026-09-21 P2-1: chatMarkdownLink 移至 ./ChatMessages（唯一定义点, 本文件 import 使用）
+// SHELL_VOICE_KEY 同样来自 ./shellVoiceConfig
 
 // 2026-08-13 key 冲突根治: 模块级单调序号——pushChat/handleHistoryResume/
 // holoHistory 共用。此前 pushChat 仅检查与前一条 ts 碰撞,3 条以上同毫秒连发
@@ -144,101 +145,8 @@ async function checkPanelEnabled(kind: string): Promise<boolean | null> {
   return _panelEnabledCache.map![kind] ?? true
 }
 
-interface ShellVoiceConfig extends VoiceConfig {
-  continuousMode: boolean
-  wakeWordEnabled: boolean
-  asrProvider: string
-  /** 专注模式（仅 PTT）：多人环境用 — 连续对话/唤醒词失效，只留按住说话 */
-  pttOnly: boolean
-  /** 2026-08-15: 静音态持久化——不方便出声时点语音球静音, 重启后保持(此前
-   *  内存态重启即恢复发声, 用户困惑"选了默认还是播报"的根因) */
-  muted: boolean
-  /** 2026-08-31: Jarvis 音效开关(useSoundEffects 总闸)——启动按此值应用 */
-  ttsFxEnabled: boolean
-  // 2026-08-04: 对齐控制台 Settings 语音配置(VoiceSection)字段——识别语言/灵敏度
-  lang?: string
-  voiceThreshold?: number
-  /** 2026-09-17: 语音对话通道——classic=ASR+TTS 接力; realtime=豆包全双工端到端 */
-  dialogChannel?: 'classic' | 'realtime'
-}
-
-// ── 语音配置单源化（2026-08-12）───────────────────────────────────────────
-// config.json 的 voice 段是唯一来源：Settings 页写入 / 本组件读取 + 监听更新。
-// localStorage 'crabpaw_shell_voice' 仅用于一次性迁移（见 loadShellConfigOnce）。
-const SHELL_VOICE_DEFAULTS: ShellVoiceConfig = {
-  replyEnabled: true,
-  continuousMode: false,
-  wakeWordEnabled: true,
-  pttOnly: false,
-  // 2026-08-24(用户反馈): muted 语义升级为「语音总开关」且默认关闭——首启即
-  // 静态白球, KWS 唤醒/ASR/TTS 全停(旧: 默认 wakeWordEnabled=true, 启动即
-  // 常驻占麦监听)。点语音球开启, 已持久化配置不受影响。
-  muted: true,
-  // 2026-08-31: Jarvis 音效缺省开(与 useSoundEffects 默认及设置页缺省一致)
-  ttsFxEnabled: true,
-  asrProvider: 'volcengine',
-  ttsProvider: 'edge-tts',
-  defaultVoice: 'zh-CN-XiaoxiaoNeural',
-  speed: 1.0,
-  doubaoVoice: 'zh_female_xiaohe_uranus_bigtts',
-  volcanoVoice: 'BV001_streaming',
-  lang: 'zh',
-  voiceThreshold: 0.008,
-}
-
-// config.voice → ShellVoiceConfig（缺省字段用统一默认值兜底）
-function normalizeVoiceSection(v: Record<string, unknown> | undefined | null): ShellVoiceConfig {
-  const cfg = { ...SHELL_VOICE_DEFAULTS, ...(v || {}) } as ShellVoiceConfig
-  // pttOnly 是 shell 扩展字段（Settings 页无此字段）：config 缺省时保持本地默认 false
-  if (typeof cfg.pttOnly !== 'boolean') cfg.pttOnly = false
-  if (typeof cfg.muted !== 'boolean') cfg.muted = false
-  // edge/sapi 系厂商音色必须是 edge 风格 ID——config 中残留的 doubao 音色会直接合成失败
-  const provider = cfg.ttsProvider || ''
-  if ((provider === 'edge' || provider === 'edge-tts' || provider === 'sapi')
-    && !/^[a-z]{2,3}-[A-Z]{2}-/.test(cfg.defaultVoice || '')) {
-    cfg.defaultVoice = 'zh-CN-XiaoxiaoNeural'
-  }
-  return cfg
-}
-
-// ShellVoiceConfig → config.voice 段（只写本组件持有的字段；后端 POST /config 按段合并，其余字段保留）
-function voiceSectionForShell(cfg: ShellVoiceConfig): Record<string, unknown> {
-  return {
-    replyEnabled: cfg.replyEnabled,
-    continuousMode: cfg.continuousMode,
-    wakeWordEnabled: cfg.wakeWordEnabled,
-    pttOnly: cfg.pttOnly,
-    muted: cfg.muted,
-    ttsFxEnabled: cfg.ttsFxEnabled,
-    asrProvider: cfg.asrProvider,
-    ttsProvider: cfg.ttsProvider,
-    defaultVoice: cfg.defaultVoice,
-    speed: cfg.speed,
-    doubaoVoice: cfg.doubaoVoice,
-    volcanoVoice: cfg.volcanoVoice,
-    lang: cfg.lang,
-    voiceThreshold: cfg.voiceThreshold,
-  }
-}
-
-// 读取 config.json（优先主进程 IPC，降级 HTTP——参考 App.tsx splash 模式）
-async function fetchConfigForShell(): Promise<Record<string, unknown> | null> {
-  if (window.electronAPI?.config?.get) {
-    try {
-      const cfg = await window.electronAPI.config.get()
-      if (cfg) return cfg as unknown as Record<string, unknown>
-    } catch (e) {
-      console.warn('[shell] IPC config.get 失败，降级 HTTP:', e)
-    }
-  }
-  try {
-    const result = await apiGet('/config')
-    if (result.success && result.data) return result.data
-  } catch (e) {
-    console.error('[shell] 语音配置读取失败（HTTP 降级）:', e)
-  }
-  return null
-}
+// ── 2026-09-21 P2-1 拆分: ShellVoiceConfig/SHELL_VOICE_DEFAULTS/normalizeVoiceSection/
+// voiceSectionForShell/fetchConfigForShell 整域移至 ./shellVoiceConfig（纯搬运零行为变化）
 
 export function VoiceShell() {
   const [shellConfig, setShellConfig] = useState<ShellVoiceConfig>(SHELL_VOICE_DEFAULTS)
@@ -405,17 +313,8 @@ export function VoiceShell() {
   // 2026-08-14: 语速三档高亮（语速配置已从左栏迁移到右上角语音球下方）
   const [speechRate, setSpeechRate] = useState<'low' | 'default' | 'high'>('default')
 
-  // 2026-08-06: 右侧对话卡片——完整对话历史（用户 + AI），可滚动
-  // 2026-08-13 P2-1: 增加 tool 角色——工具调用记录行(用户消息后/AI 回复前)
-  // 2026-08-19 三栏联动轮: 增加 round 字段——轮次序号(一次用户发送 = 一轮),
-  // 三栏联动键(时间线组/对话流消息/右栏工具批按轮对齐)
-  // 2026-08-21: 附件字段——用户消息气泡渲染上传的图片/文件
-  // （后端 /chat files 协议形状一致：path/name/type/size）
-  interface ChatMsgFile { path: string; name: string; size?: number; type?: string }
-  // 2026-09-07: channel——消息来源通道标记（'wecom'=企业微信同步镜像），气泡带通道徽标
-  // 2026-09-20: speaker——圆桌会专家署名（对话流内直接以专家身份出气泡，不建独立卡）
-  interface RtSpeaker { name: string; dept?: string; round?: number }
-  interface ChatMsg { role: 'user' | 'ai' | 'tool'; text: string; ts: number; toolId?: string; round?: number; files?: ChatMsgFile[]; channel?: 'wecom' | 'lark'; speaker?: RtSpeaker }
+  // 2026-09-21 P2-1: ChatMsg 族类型提升至 ./types（组件内 interface 无法跨文件共享,
+  // 也是消息渲染组件拆分的前置）。字段与注释原样保留, 见 types.ts。
   const [conversation, setConversation] = useState<ChatMsg[]>([])
   const conversationRef = useRef<ChatMsg[]>([])
   // 2026-08-19 三栏联动轮: 轮次序号 + 最近一轮(用户消息落轮次, AI 落卡沿用)
@@ -424,13 +323,13 @@ export function VoiceShell() {
   // 2026-08-13: 消息反馈(P0-3)——按 ts 记录已反馈状态,失败回滚保持可点
   // (handleMessageFeedback 在 flow 声明之后定义,见 flow 下方)
   const [feedbackMap, setFeedbackMap] = useState<Map<number, 'up' | 'down'>>(new Map())
-  const pushChat = useCallback((role: 'user' | 'ai' | 'tool', text: string, toolId?: string, round?: number, files?: ChatMsgFile[], channel?: 'wecom' | 'lark', speaker?: RtSpeaker) => {
+  const pushChat = useCallback((role: 'user' | 'ai' | 'tool', text: string, toolId?: string, round?: number, files?: ChatMsgFile[], channel?: 'wecom' | 'lark', speaker?: RtSpeaker, decision?: RtDecisionCard) => {
     const clean = text?.trim() || ''
     if (!clean && (!files || files.length === 0)) return
     // 2026-08-13: ts 定位键——nextChatTs 单调唯一(点赞/点踩按 ts 定位,
     // 同 ms 任意数量连发不碰撞;此前仅查前一条,3 条以上同 ms 仍重复)
     const ts = nextChatTs()
-    const next = [...conversationRef.current, { role, text: clean, ts, toolId, round, files: files && files.length > 0 ? files : undefined, channel, speaker }]
+    const next = [...conversationRef.current, { role, text: clean, ts, toolId, round, files: files && files.length > 0 ? files : undefined, channel, speaker, decision }]
     conversationRef.current = next
     setConversation(next)
   }, [])
@@ -494,8 +393,16 @@ export function VoiceShell() {
       pushChat('ai', `📊 会务组已实算会场数据简报，专家发言将以此为准：\n\n${text}`)
     }, [pushChat]),
     onConclusion: useCallback((c: RtConclusion, host: { name: string; department?: string } | null) => {
+      // 2026-09-21 创新-B: 收口升级为结构化决策卡(text 为降级/复制用全文,
+      // decision 驱动分栏渲染); 决策卡=结论态永久属对话历史, 文档=产物态独立出卡
       const taskLines = c.tasks.map((t) => `☐ ${t.owner}：${t.task}`).join('\n')
-      pushChat('ai', `✅ 会议收口\n\n${c.text}${taskLines ? `\n\n—— 任务清单 ——\n${taskLines}` : ''}`, undefined, undefined, undefined, undefined, { name: host ? `${host.name}（主持）` : '主持', dept: host?.department, round: 3 })
+      pushChat(
+        'ai',
+        `✅ 会议收口\n\n${c.text}${taskLines ? `\n\n—— 任务清单 ——\n${taskLines}` : ''}`,
+        undefined, undefined, undefined, undefined,
+        { name: host ? `${host.name}（主持）` : '主持', dept: host?.department, round: 3 },
+        { text: c.text, tasks: c.tasks },
+      )
     }, [pushChat]),
     onDocument: useCallback((doc: RtDocument) => {
       pushChat('ai', `📄 会议纪要已生成：${doc.name}（已出文件卡，可投递企微）`)
@@ -804,7 +711,7 @@ export function VoiceShell() {
   // flow.toolEvents 每轮清空重填(sendText 清空)——清空即旧批收官, 归档到轮次。
   // 归档轮次: 清空发生在下一轮 sendText 后(round 已递增), 旧批属上一轮。
   // 上限 20 批(环形裁剪, 防长会话无界增长)。
-  type FlowToolEvent = (typeof flow.toolEvents)[number]
+  // 2026-09-21 P2-1: FlowToolEvent 提升至 ./types（原 (typeof flow.toolEvents)[number] 的类型等价变换）
   const toolBatchesRef = useRef<Array<{ round: number; events: FlowToolEvent[] }>>([])
   const activeBatchRef = useRef<FlowToolEvent[] | null>(null)
   useEffect(() => {
@@ -1517,6 +1424,8 @@ export function VoiceShell() {
   }, [])
 
   const [textInput, setTextInput] = useState('')
+  // 2026-09-21 创新-B: 决策卡"追问"按钮预填后聚焦输入框
+  const chatInputRef = useRef<HTMLInputElement>(null)
   // 2026-08-19 修复: 组合输入状态自跟踪——此前依赖 e.nativeEvent.isComposing 守卫回车,
   // 但 SideSheet 打开时焦点被抢(关闭按钮 focus)打断组合 → compositionend 不触发 →
   // 原生 isComposing 卡死为 true → 之后回车永远被吞(鼠标点发送却正常)。
@@ -2570,6 +2479,9 @@ export function VoiceShell() {
 
         {/* 对话区：空态提示/快捷建议 or 消息列表 */}
         <div className="voice-shell-chat-area">
+          {/* 2026-09-21 晨报带——零输入信息层: 日程/应收逾期/临期合同/本月营收,
+              数据全无时整条隐藏; 点击指标块经 handleCommandChip 直发追问 */}
+          <MorningBriefingStrip onAsk={handleCommandChip} />
           {conversation.length === 0 ? (
             <div className="voice-shell-chat-empty">
               <div className="voice-shell-chat-empty-hint">
@@ -2603,176 +2515,26 @@ export function VoiceShell() {
                   进对话流, 自 08-14 起由侧栏承载); 消息完成才落卡→时间戳天然"完成后显示"
                   (Kotlin MessageBubble 同口径, 流式中不显示元数据) */}
               {conversation.map(m => (
-                <div
+                <ChatMessageItem
                   key={m.ts}
-                  className={`chatcard-msg chatcard-msg--${m.role}${linkedRound === m.round ? ' chatcard-msg--linked' : ''}`}
-                  data-round={m.round ?? undefined}
-                  /* 2026-08-19 三栏联动轮: 点击消息 → 左栏时间线高亮同轮组 + 右栏定位 */
-                  onClick={m.round != null ? () => linkRound(m.round as number) : undefined}
-                  title={m.role === 'user' ? '点击定位到时间线事件组' : undefined}
-                >
-                  {m.role === 'ai' && m.speaker ? (
-                    /* 2026-09-20 圆桌会专家署名头像——部门七色圆徽, 悬停看姓名 */
-                    <span
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                        background: rtDeptColor(m.speaker.dept), color: '#fff', fontSize: 13, fontWeight: 600,
-                      }}
-                      title={m.speaker.name}
-                    >
-                      {(m.speaker.name || '?').charAt(0)}
-                    </span>
-                  ) : m.role === 'ai' ? (
-                    <div className="chatcard-msg-avatar chatcard-msg-avatar--ai">
-                      <span className="chatcard-msg-avatar-letter">
-                        {/^(https?:|local:\/\/|\/)/.test(agentDisplayIcon)
-                          ? <img src={agentDisplayIcon} alt="AI" className="chatcard-msg-avatar-img" />
-                          : agentDisplayIcon}
-                      </span>
-                    </div>
-                  ) : m.role === 'tool' ? (
-                    <span className="chatcard-msg-label chatcard-msg-label--tool">🔧</span>
-                  ) : (
-                    <span className="chatcard-msg-username chatcard-msg-username--user">{m.channel === 'wecom' ? '企微' : 'YOU'}</span>
-                  )}
-                  <div className="chatcard-msg-col">
-                    {m.role === 'ai' && (
-                      <div className="chatcard-msg-name chatcard-msg-name--ai">
-                        {m.speaker
-                          ? `${m.speaker.name}${m.speaker.round === 1 ? ' · 开场立场' : m.speaker.round === 2 ? ' · 交锋对齐' : ''}`
-                          : `${agentDisplayName}${m.channel === 'wecom' ? '（企微）' : ''}`}
-                      </div>
-                    )}
-                    <div className={`chatcard-msg-bubble${m.role === 'tool' ? ' chatcard-msg-bubble--tool' : m.role === 'ai' && !m.speaker ? ' chatcard-msg-bubble--md' : ''}`}>
-                      {/* 2026-08-21: 用户消息附件——图片缩略图 + 文件 chip，文本之前 */}
-                      {m.role === 'user' && m.files && m.files.length > 0 && (
-                        <div className="chatcard-attachments">
-                          {m.files.map((f, i) => (
-                            isImageAttachment(f.name) ? (
-                              <img
-                                key={`${f.path}-${i}`}
-                                src={fileUrlFor(f.path)}
-                                alt={f.name}
-                                className="chatcard-attachment-img"
-                                title={`${f.name}（点击打开原图）`}
-                                onClick={() => openAttachmentFile(f)}
-                                loading="lazy"
-                              />
-                            ) : (
-                              <button
-                                key={`${f.path}-${i}`}
-                                type="button"
-                                className="chatcard-attachment-file"
-                                title={f.path}
-                                onClick={() => openAttachmentFile(f)}
-                              >
-                                📎 {f.name}
-                                {formatFileSize(f.size) ? <span className="chatcard-attachment-size"> {formatFileSize(f.size)}</span> : null}
-                              </button>
-                            )
-                          ))}
-                        </div>
-                      )}
-                      {m.role === 'ai'
-                        ? (m.speaker
-                          ? <span style={{ whiteSpace: 'pre-wrap' }}>{m.text}</span>
-                          : <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: chatMarkdownLink }}>{m.text}</ReactMarkdown>)
-                        : m.text}
-                    </div>
-                    {/* 2026-08-14 ag-ui 二次分析: 消息时间戳(完成后才渲染) */}
-                    <div className="chatcard-msg-time">
-                      {new Date(m.ts).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })}
-                    </div>
-                    {m.role === 'ai' && (() => {
-                      /* 2026-08-19 三栏联动轮: 该轮工具批(历史/当前)——非空才显示 ⛓ 按钮 */
-                      const batch = m.round != null ? getToolBatch(m.round) : null
-                      const chainOpen = toolchainOpenTs.has(m.ts)
-                      return (
-                      <>
-                      {/* 2026-08-25 界面对齐(小白龙步骤卡): 本轮工具 mini 徽标——
-                          成功✓/失败✕/进行中⏳, 展开 ⛓ 看详情 */}
-                      {batch && batch.length > 0 && (
-                        <div className="chatcard-msg-runsum">
-                          <span className="chatcard-msg-runsum-label">⟫ 本轮工具</span>
-                          {batch.slice(0, 4).map((t) => (
-                            <span key={t.toolId} className={`chatcard-msg-runsum-item chatcard-msg-runsum-item--${t.status}`}>
-                              {t.status === 'error' ? '✕' : t.status === 'running' ? '⏳' : '✓'} {t.toolName}
-                            </span>
-                          ))}
-                          {batch.length > 4 && <span className="chatcard-msg-runsum-more">+{batch.length - 4}</span>}
-                        </div>
-                      )}
-                      <div className="chatcard-msg-actions">
-                        {/* ag-ui 二次分析: hover 动作行扩展——复制/重新生成(copilot-regenerate-button) */}
-                        <button
-                          type="button"
-                          className="chatcard-msg-action"
-                          onClick={() => handleCopyMessage(m)}
-                          title="复制回复"
-                          aria-label="复制回复"
-                        >📋</button>
-                        <button
-                          type="button"
-                          className="chatcard-msg-action"
-                          onClick={() => handleRegenerate(m)}
-                          title="重新生成"
-                          aria-label="重新生成"
-                        >↻</button>
-                        {batch && batch.length > 0 && (
-                          <button
-                            type="button"
-                            className={`chatcard-msg-action${chainOpen ? ' is-active' : ''}`}
-                            onClick={() => toggleToolchain(m.ts)}
-                            title={`查看本轮工具链(${batch.length} 个工具)`}
-                            aria-label={`工具链 ${batch.length} 个工具`}
-                          >⛓ {batch.length}</button>
-                        )}
-                        <button
-                          type="button"
-                          className={`chatcard-msg-action ${feedbackMap.get(m.ts) === 'up' ? 'is-active' : ''}`}
-                          onClick={() => handleMessageFeedback(m, 'up')}
-                          title="有帮助"
-                          aria-label="有帮助"
-                        >👍</button>
-                        <button
-                          type="button"
-                          className={`chatcard-msg-action ${feedbackMap.get(m.ts) === 'down' ? 'is-active' : ''}`}
-                          onClick={() => handleMessageFeedback(m, 'down')}
-                          title="不准确"
-                          aria-label="不准确"
-                        >👎</button>
-                      </div>
-                      {/* 2026-08-19 三栏联动轮: 工具链回看面板——该轮全部工具
-                          调用/结果(名称/状态/参数/摘要), 消息旁内联展开 */}
-                      {chainOpen && batch && batch.length > 0 && (
-                        <div className="chatcard-toolchain">
-                          {batch.map(t => (
-                            <div key={t.toolId} className="chatcard-toolchain-item" data-status={t.status}>
-                              <div className="chatcard-toolchain-head">
-                                <span className={`chatcard-toolchain-dot chatcard-toolchain-dot--${t.status}`} />
-                                <span className="chatcard-toolchain-name">{t.toolName}</span>
-                                <span className="chatcard-toolchain-status">
-                                  {t.status === 'running' ? '进行中' : t.status === 'error' ? '失败' : '完成'}
-                                </span>
-                              </div>
-                              {t.args && (
-                                <div className="chatcard-toolchain-args" title="工具参数">
-                                  {t.args.length > 140 ? `${t.args.slice(0, 140)}…` : t.args}
-                                </div>
-                              )}
-                              {t.summary && (
-                                <div className="chatcard-toolchain-summary" title="结果摘要">{t.summary}</div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      </>
-                      )
-                    })()}
-                  </div>
-                </div>
+                  m={m}
+                  linked={linkedRound === m.round}
+                  agentDisplayName={agentDisplayName}
+                  agentDisplayIcon={agentDisplayIcon}
+                  feedback={feedbackMap.get(m.ts)}
+                  onLinkRound={linkRound}
+                  onOpenAttachment={openAttachmentFile}
+                  onFollowUp={() => {
+                    setTextInput('关于刚才的结论，我想追问：')
+                    chatInputRef.current?.focus()
+                  }}
+                  getToolBatch={getToolBatch}
+                  toolchainOpen={toolchainOpenTs.has(m.ts)}
+                  onToggleToolchain={toggleToolchain}
+                  onCopy={handleCopyMessage}
+                  onRegenerate={handleRegenerate}
+                  onFeedback={handleMessageFeedback}
+                />
               ))}
               {/* 2026-08-14 C-1: 流式回复气泡——增量实时显示 + ▌ 光标, 定稿落卡后自动消失 */}
               {streamingAiText !== '' && (
@@ -2891,6 +2653,7 @@ export function VoiceShell() {
             </button>
             <input
               className="voice-shell-chat-input-field"
+              ref={chatInputRef}
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
               /* 2026-08-14 ag-ui 二次分析: IME 组合守卫——拼音候选词确认回车不误发送
@@ -3106,6 +2869,10 @@ export function VoiceShell() {
         onClose={() => setHistoryDrawerOpen(false)}
         onResume={handleHistoryResume}
       />
+
+      {/* 2026-09-21 创新-C: 今日产出轴——右下折叠徽标列今天生成的文档产物,
+          无今日产物自隐藏(fixed 定位, 不占对话流布局) */}
+      <TodayOutputRail />
     </div>
   )
 }

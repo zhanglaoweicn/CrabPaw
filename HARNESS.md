@@ -17,9 +17,9 @@
 | 契约遗留别名 | 24（snake 22 + kebab 2） | 同上 → LEGACY_SNAKE/KEBAB_ALIASES |
 | 契约键合计 | 274 | 上两行之和 |
 | 审计事件类型 | 43 | src/core/audit-log-v2.js → AUDIT_EVENTS |
-| Eval 套件 / 用例 | 58 / 456 | evals/suite-registry.js |
+| Eval 套件 / 用例 | 59 / 462 | evals/suite-registry.js |
 | PROMPT_VERSION | 未检出（代码中无常量，版本记录见 HARNESS.md 提示词版本表） | src/core/system-prompt.js |
-<!-- 生成时间: 2026-09-08T14:52:47.990Z -->
+<!-- 生成时间: 2026-09-21T13:05:39.979Z -->
 <!-- END GENERATED: harness-facts -->
 
 ## 一、Tool Contract 规范
