@@ -13,6 +13,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { rtDeptColor } from '../../hooks/useRoundtable'
 import { isImageAttachment, fileUrlFor, formatFileSize } from '../../lib/attachment'
+import { SUGGESTED_PROMPTS } from '../../lib/voice-panel-commands'
 import type { ChatMsg, ChatMsgFile, FlowToolEvent } from './types'
 
 // Markdown 链接组件: 新窗口打开(react-markdown 默认 <a> 在同一窗口覆盖会话)
@@ -265,5 +266,102 @@ export function ChatMessageItem({
         })()}
       </div>
     </div>
+  )
+}
+
+// ── 2026-09-21 P2-1 第二批: 空态/流式气泡/圆桌"正在输入"从 index.tsx 迁入 ──
+
+/** 对话区空态: 模式化提示 + 快捷建议 chip（点击经 handleCommandChip 直发） */
+export function ChatEmptyState({
+  pttOnly,
+  continuousMode,
+  onAsk,
+}: {
+  pttOnly: boolean
+  continuousMode: boolean
+  onAsk: (text: string) => void
+}) {
+  return (
+    <div className="voice-shell-chat-empty">
+      <div className="voice-shell-chat-empty-hint">
+        {/* P3(GUI 全量修复 P0): 提示按语音模式三态渲染——旧实现只分
+            pttOnly/其他两态, live(实时)模式唤醒词已禁用却仍提示"说小螃蟹",
+            用户照提示操作必然无反应 */}
+        {pttOnly
+          ? '专注模式 · 按住空格键开始说话'
+          : continuousMode
+            ? '实时监听中 · 直接说话即可'
+            : '说「小螃蟹」或直接输入文字开始对话'}
+      </div>
+      {!pttOnly && (
+        <div className="voice-shell-suggest">
+          {SUGGESTED_PROMPTS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              className="voice-shell-suggest-chip"
+              onClick={() => onAsk(s)}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 2026-08-14 C-1: 流式回复气泡——增量实时显示 + ▌ 光标, 定稿落卡后自动消失 */
+export function StreamingBubble({ agentDisplayName, text }: { agentDisplayName: string; text: string }) {
+  return (
+    <div className="chatcard-msg chatcard-msg--ai chatcard-msg--streaming">
+      <div className="chatcard-msg-avatar chatcard-msg-avatar--ai">
+        <span className="chatcard-msg-avatar-letter">{agentDisplayName.charAt(0)}</span>
+      </div>
+      <div className="chatcard-msg-col">
+        <div className="chatcard-msg-name chatcard-msg-name--ai">{agentDisplayName}</div>
+        <div className="chatcard-msg-bubble chatcard-msg-bubble--md">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: chatMarkdownLink }}>{text}</ReactMarkdown>
+          <span className="chatcard-stream-cursor" aria-hidden="true">▌</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export interface RtTypingState {
+  running: boolean
+  typing: { name: string; dept?: string } | null
+}
+
+/** 2026-09-20 圆桌会"正在输入"——顺序调度确定性: 排到谁发言即显示,
+    生成完毕气泡弹出、语音接上。会议内容本体走 pushChat 署名气泡, 不再有独立卡片 */
+export function RtTypingIndicator({ running, typing }: RtTypingState) {
+  return (
+    <>
+      <style>{'@keyframes rtDot { 0%, 60%, 100% { opacity: .2 } 30% { opacity: 1 } }'}</style>
+      {running && typing && (
+        <div className="chatcard-msg chatcard-msg--ai">
+          <span
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+              background: rtDeptColor(typing.dept), color: '#fff', fontSize: 13, fontWeight: 600, opacity: 0.75,
+            }}
+          >
+            {(typing.name || '?').charAt(0)}
+          </span>
+          <div className="chatcard-msg-col">
+            <div className="chatcard-msg-name chatcard-msg-name--ai">{typing.name}</div>
+            <div className="chatcard-msg-bubble" style={{ opacity: 0.7 }}>
+              正在输入
+              <span style={{ animation: 'rtDot 1.2s infinite' }}>·</span>
+              <span style={{ animation: 'rtDot 1.2s infinite 0.2s' }}>·</span>
+              <span style={{ animation: 'rtDot 1.2s infinite 0.4s' }}>·</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }

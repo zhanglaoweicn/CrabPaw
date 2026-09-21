@@ -23,12 +23,11 @@ import { AmbientGlow } from '../../components/AmbientGlow'
 import { MorningBriefingStrip } from '../../components/MorningBriefingStrip'
 import { TodayOutputRail } from '../../components/TodayOutputRail'
 // ── 2026-09-21 P2-1 拆分: 语音配置域/对话类型/单条消息渲染移出主文件 ──
-import {
-  SHELL_VOICE_KEY, SHELL_VOICE_DEFAULTS, ShellVoiceConfig,
-  normalizeVoiceSection, voiceSectionForShell, fetchConfigForShell,
-} from './shellVoiceConfig'
+import { useShellVoiceConfig } from './useShellVoiceConfig'
 import type { ChatMsg, ChatMsgFile, RtSpeaker, RtDecisionCard, FlowToolEvent } from './types'
-import { ChatMessageItem, chatMarkdownLink } from './ChatMessages'
+import { ChatMessageItem, ChatEmptyState, StreamingBubble, RtTypingIndicator } from './ChatMessages'
+import { ChatInputArea } from './ChatInputArea'
+import { useRoundtableChat } from './useRoundtableChat'
 import TaskOrbit from '../../components/TaskOrbit'
 import { HoloDissolve } from '../../components/HoloDissolve'
 import { SceneSurfaceRenderer } from '../../components/SceneShell'
@@ -40,14 +39,12 @@ import { useKwsWakeWord, type KwsAudioLevel } from '../../hooks/useKwsWakeWord'
 import { useVoiceState } from '../../contexts/VoiceStateContext'
 import { useSpeechQueue } from '../../hooks/useSpeechQueue'
 import { useSceneSurfaces } from '../../lib/scene-client'
-import type { VoiceConfig } from '../../hooks/useVoiceReply'
-import { resolveVoiceStyle, resolveExpertTtsVoice } from '../../lib/expert-persona'
-import { matchPanelCommand, stripCommandPrefix, extractSongQuery, SUGGESTED_PROMPTS, detectExpertSummonCommand, detectExpertMeetingConfirmation } from '../../lib/voice-panel-commands'
+import { resolveExpertTtsVoice } from '../../lib/expert-persona'
+import { matchPanelCommand, stripCommandPrefix, extractSongQuery, detectExpertSummonCommand, detectExpertMeetingConfirmation } from '../../lib/voice-panel-commands'
 import { summonExpert, fetchTeamPresets, fetchExpertDetail, fetchExpertsByDepartment } from '../../components/ExpertsPanel/api'
 import { deriveAgentFocus, deriveOrbMode, deriveOrbVolume } from '../../lib/voice-orb-state'
 import { interceptLocalVoiceCommand } from '../../lib/voiceCommands'
 import { isDevMode } from '../../lib/dev-mode'
-import { setSoundEnabled } from '../../hooks/useSoundEffects'
 import { apiGet, apiPost } from '../../lib/api'
 import { useDraggable } from '../../lib/useDraggable'
 import { ShellFloatCard } from '../../components/ShellFloatCard'
@@ -57,9 +54,8 @@ import { SysInfoCard } from '../../components/SysInfoCard'
 import { fileUrlFor } from '../../lib/attachment'
 import { isCardWallKind, loadDismissedKeys, saveDismissedKeys } from '../../lib/surface-utils'
 import { subscribeSse } from '../../lib/sse-hub'
-import { useRoundtableMeetings, rtDeptColor, type RtStatement, type RtIntervention, type RtConclusion, type RtDocument } from '../../hooks/useRoundtable'
 import { nextPhaseThreshold, phaseText, sceneFromPhase } from '../../lib/holo-phase'
-import { Minus, Square, X, Columns, RotateCcw, LayoutDashboard, History, Brush, ChevronDown, Send } from 'lucide-react'
+import { Minus, Square, X, Columns, RotateCcw, LayoutDashboard, History, Brush, ChevronDown,  } from 'lucide-react'
 import { toast } from 'sonner'
 import { ManagementCockpit, type CockpitTab } from '../../components/ManagementCockpit'
 import { COCKPIT_TAB_MAP, COCKPIT_TARGET_MAP } from '../../lib/cockpit-navigation'
@@ -76,16 +72,12 @@ import { ToolCardStream } from './ToolCardStream'
 // 后端仍在广播 subagent:start/end + collab:* → 专家完成播报/协作总结/评审卡
 // 整链静默丢失
 import { CollabOrbit } from '../../components/CollabOrbit'
-// 2026-08-19 三栏联动轮 P2: 审批输入区接管——inline 变体嵌输入区上方(非悬浮卡)
-import { ApprovalHost } from '../../components/ApprovalHost'
 import { FocusRibbon } from '../../components/FocusRibbon'
 import { ORB_FLOAT_DOM_ID } from '../../lib/collab-orbit'
 import './styles.css'
 // 2026-08-19 排版修复: 对话气泡启用 Markdown 渲染(react-markdown + GFM 已在依赖,
 // FileGenPanel 同款用法)——此前纯文本直出, LLM 输出的 **加粗**/- 列表/链接
 // 原样显示源码字符, 用户看到"没有格式化排版"。
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 
 // 2026-09-21 P2-1: chatMarkdownLink 移至 ./ChatMessages（唯一定义点, 本文件 import 使用）
 // SHELL_VOICE_KEY 同样来自 ./shellVoiceConfig
@@ -149,7 +141,9 @@ async function checkPanelEnabled(kind: string): Promise<boolean | null> {
 // voiceSectionForShell/fetchConfigForShell 整域移至 ./shellVoiceConfig（纯搬运零行为变化）
 
 export function VoiceShell() {
-  const [shellConfig, setShellConfig] = useState<ShellVoiceConfig>(SHELL_VOICE_DEFAULTS)
+  // ── 2026-09-21 P2-1 第三批: 语音配置状态域搬至 ./useShellVoiceConfig（含加载/迁移/
+  // 自愈/监听/派生/写入通道，行为逐字一致） ──
+  const { shellConfig, muted, dialogChannel, voiceConfig, agentDisplayName, agentDisplayIcon, applyShellConfig } = useShellVoiceConfig()
   // ── 智能体显示名：单源来自 cfg.agent.name（SetupWizard/管理舱配置页写入）
   //         默认值 'CrabPaw'——本项目 BossAgent 自身代号，不硬编码第三方品牌名 ──
   // 2026-08-31 M3: 布局模式——simple(三浮动卡片)/advanced(原三栏即时切换,信息零丢失)
@@ -181,82 +175,6 @@ export function VoiceShell() {
   useEffect(() => {
     try { if (chatDragOffset) localStorage.setItem('voice-shell.card.chat', JSON.stringify(chatDragOffset)) } catch { /* 忽略 */ }
   }, [chatDragOffset])
-  const [agentDisplayName, setAgentDisplayName] = useState<string>('CrabPaw')
-  // 2026-08-25(用户反馈): 对话窗口头像应对齐智能体配置页——activeProfile 的
-  // icon(默认 🦀);此前用名字首字(「小」=小龙女首字), 配置页头像形同虚设。
-  const [agentDisplayIcon, setAgentDisplayIcon] = useState<string>('🦀')
-
-  // ── 语音配置 + 智能体名：启动从 config.json 同一次加载 ──
-  const configLoadedRef = useRef(false)
-  useEffect(() => {
-    let cancelled = false
-    const loadShellConfigOnce = async () => {
-      try {
-        const cfg = await fetchConfigForShell()
-        if (cancelled) return
-        let voice: Record<string, unknown> = (cfg?.voice as Record<string, unknown>) || {}
-        // 平滑迁移：旧 localStorage 配置合并进 config（localStorage 值优先），成功后清除——
-        // 一次性迁移，此后 config.json 成为唯一源；写入失败则保留 localStorage 下次重试
-        try {
-          const raw = localStorage.getItem(SHELL_VOICE_KEY)
-          if (raw) {
-            const legacy = JSON.parse(raw) as Record<string, unknown>
-            voice = { ...voice, ...legacy }
-            try {
-              await apiPost('/config', { voice })
-              localStorage.removeItem(SHELL_VOICE_KEY)
-              console.log('[shell] 已迁移 localStorage 语音配置到 config.json（单源化完成）')
-            } catch (e) {
-              console.error('[shell] 语音配置迁移写入失败，保留 localStorage 待重试:', e)
-            }
-          }
-        } catch (e) {
-          console.error('[shell] 语音配置迁移解析失败:', e)
-        }
-        // ── 2026-08-15 配置自愈(唤醒词失效根因): "默认"模式(pttOnly=false &&
-        // continuousMode=false)的语义就是"唤醒词+空格可用", 但持久配置可能出现
-        // wakeWordEnabled=false 的不一致组合(如专注模式遗留)——此时 KWS 订阅
-        // 永不建立, 唤醒词命中无人消费("说了唤醒词没反应")。启动即修复并回写。
-        const healed = normalizeVoiceSection(voice)
-        if (!healed.pttOnly && !healed.continuousMode && !healed.wakeWordEnabled) {
-          console.warn('[shell] 配置自愈: 默认模式下 wakeWordEnabled=false → 修复为 true')
-          healed.wakeWordEnabled = true
-          try {
-            apiPost('/config', { voice: voiceSectionForShell(healed) }).catch((e) => console.warn('[shell] 配置自愈保存失败:', e?.message || e))
-          } catch (e) { console.warn('[shell] 配置自愈回写失败:', e) }
-        }
-        setShellConfig(healed)
-        // 2026-08-31 修复: Jarvis 音效总闸接通真实逻辑——启动按持久化的
-        // config.voice.ttsFxEnabled 应用 useSoundEffects 开关(缺省视为开, 与
-        // localStorage 默认 behavior 及设置页缺省一致)。
-        try {
-          setSoundEnabled(healed.ttsFxEnabled !== false)
-        } catch (e) { console.warn('[shell] 应用音效开关失败:', e instanceof Error ? e.message : String(e)) }
-        // ── 2026-08-14 取消硬编码：agent 名使用配置页真实值 ──
-        const agentCfg = cfg?.agent as Record<string, unknown> | undefined
-        const cfgName = typeof agentCfg?.name === 'string' && agentCfg.name.trim()
-          ? agentCfg.name.trim()
-          : null
-        if (cfgName) setAgentDisplayName(cfgName)
-        // 2026-08-25: 头像同步配置页 activeProfile.icon(失败静默默认 🦀, 不阻塞)
-        try {
-          const pres = await apiGet('/api/profiles')
-          const plist = (pres?.data?.profiles || []) as Array<{ id: string; icon?: string; isDefault?: boolean }>
-          const actId = pres?.data?.activeProfile as string | null | undefined
-          const p = plist.find(x => actId ? x.id === actId : x.isDefault) || plist[0]
-          if (p?.icon) setAgentDisplayIcon(String(p.icon))
-        } catch (err: any) { console.warn('[shell] 加载智能体头像失败(默认 🦀):', err?.message || err) }
-        configLoadedRef.current = true
-      } catch (e) {
-        console.error('[shell] 加载语音配置失败，使用默认值:', e)
-        setShellConfig(SHELL_VOICE_DEFAULTS)
-        configLoadedRef.current = true
-      }
-    }
-    loadShellConfigOnce()
-    return () => { cancelled = true }
-  }, [])
-
   // ── 2026-08-14: 后端服务自动启动（AgentHome 删除后自其挂载 effect 迁移）──
   // 非首启默认直达 VoiceShell 后后端无人启动 → 全部 API ECONNREFUSED（G5 遗留缺口）。
   // service:start 内部有端口检查,已运行则直接返回（幂等,可安全重复调用）。
@@ -272,44 +190,6 @@ export function VoiceShell() {
     })()
   }, [])
 
-  // 监听 Settings 页保存（config-updated / config-updated-voice）→ 重新拉取并刷新
-  useEffect(() => {
-    const onConfigUpdated = () => {
-      if (!configLoadedRef.current) return
-      ;(async () => {
-        try {
-          const cfg = await fetchConfigForShell()
-          if (cfg === null) return // 拉取失败：保持当前状态，避免误重置
-          setShellConfig(normalizeVoiceSection((cfg.voice as Record<string, unknown>) || {}))
-        } catch (e) {
-          console.error('[shell] 配置更新事件重载失败:', e)
-        }
-      })()
-    }
-    window.addEventListener('config-updated', onConfigUpdated)
-    window.addEventListener('config-updated-voice', onConfigUpdated)
-    return () => {
-      window.removeEventListener('config-updated', onConfigUpdated)
-      window.removeEventListener('config-updated-voice', onConfigUpdated)
-    }
-  }, [])
-
-  // 构建 useVoiceChatFlow 所需的 VoiceConfig
-  // P4 style 注入：当前固定 orchestrator 音色；运行时按 activeArchetype 切换待 Task 5 接线（useVoiceChatFlow 尚未暴露 onRoute 回调）
-  // personaPrefix 同理 — 当前无 TTS 文本单一组装点，前缀注入随轨道图接线（Task 5）
-  const voiceConfig: VoiceConfig = {
-    replyEnabled: shellConfig.replyEnabled,
-    continuousMode: shellConfig.continuousMode,
-    ttsProvider: shellConfig.ttsProvider,
-    defaultVoice: shellConfig.defaultVoice,
-    speed: shellConfig.speed,
-    doubaoVoice: shellConfig.doubaoVoice,
-    volcanoVoice: shellConfig.volcanoVoice,
-    style: resolveVoiceStyle('orchestrator'),
-  }
-
-  // 2026-08-15: muted 派生自 shellConfig(持久化)——重启后保持静音
-  const muted = shellConfig.muted === true
   // 2026-08-14: 语速三档高亮（语速配置已从左栏迁移到右上角语音球下方）
   const [speechRate, setSpeechRate] = useState<'low' | 'default' | 'high'>('default')
 
@@ -376,41 +256,12 @@ export function VoiceShell() {
   }, [])
 
   // 2026-09-17: 语音对话通道——设置页切换, 缺省 classic(既有链路不动)
-  const dialogChannel: 'classic' | 'realtime' = shellConfig.dialogChannel === 'realtime' ? 'realtime' : 'classic'
 
   // 2026-09-20 圆桌会——多专家群聊式讨论：会议过程/内容直接以对话气泡进对话流
   // （专家署名气泡/老板插话右侧气泡/结论任务收口消息），不再渲染独立圆桌卡。
   // realtime 双工通道激活时自动静音（防双音/半双工原则），文字实时可读不受影响。
-  const roundtable = useRoundtableMeetings({
-    initialMuted: dialogChannel === 'realtime',
-    onStatement: useCallback((s: RtStatement) => {
-      pushChat('ai', s.failed ? '（该岗位本次未能发言）' : s.text, undefined, undefined, undefined, undefined, { name: s.expertName, dept: s.department, round: s.round })
-    }, [pushChat]),
-    onIntervention: useCallback((it: RtIntervention) => {
-      pushChat('user', it.text)
-    }, [pushChat]),
-    onBrief: useCallback((text: string) => {
-      pushChat('ai', `📊 会务组已实算会场数据简报，专家发言将以此为准：\n\n${text}`)
-    }, [pushChat]),
-    onConclusion: useCallback((c: RtConclusion, host: { name: string; department?: string } | null) => {
-      // 2026-09-21 创新-B: 收口升级为结构化决策卡(text 为降级/复制用全文,
-      // decision 驱动分栏渲染); 决策卡=结论态永久属对话历史, 文档=产物态独立出卡
-      const taskLines = c.tasks.map((t) => `☐ ${t.owner}：${t.task}`).join('\n')
-      pushChat(
-        'ai',
-        `✅ 会议收口\n\n${c.text}${taskLines ? `\n\n—— 任务清单 ——\n${taskLines}` : ''}`,
-        undefined, undefined, undefined, undefined,
-        { name: host ? `${host.name}（主持）` : '主持', dept: host?.department, round: 3 },
-        { text: c.text, tasks: c.tasks },
-      )
-    }, [pushChat]),
-    onDocument: useCallback((doc: RtDocument) => {
-      pushChat('ai', `📄 会议纪要已生成：${doc.name}（已出文件卡，可投递企微）`)
-    }, [pushChat]),
-    onEnded: useCallback((status: string, error?: string | null) => {
-      if (status !== 'done') pushChat('ai', `⚠️ 圆桌会异常中断：${error || '未知错误'}`)
-    }, [pushChat]),
-  })
+  // 2026-09-21 P2-1: 圆桌会×对话流六路回调搬至 ./useRoundtableChat（逐字搬移）
+  const roundtable = useRoundtableChat(pushChat, dialogChannel)
 
   const flow = useVoiceChatFlow(voiceConfig, muted, handlePhase, {
     ttsMode: dialogChannel,
@@ -517,26 +368,6 @@ export function VoiceShell() {
 
   // 2026-08-04: 布局简化——球永远居中，回复用"字幕式"（球下方一行，说完消失）。
   // 移除左侧对话大卡（内容多时遮挡/排版乱问题）；任务卡存在性事件保留（无副作用）。
-
-  // ── 单源化写入通道：乐观更新本地 state + 异步 POST /api/config（合并 voice 段） ──
-  // 写入失败仅 console.error，不阻塞交互（UI 已乐观更新，重启后可能回退到旧值）
-  const shellConfigRef = useRef<ShellVoiceConfig>(shellConfig)
-  shellConfigRef.current = shellConfig
-  const persistShellConfig = useCallback(async (next: ShellVoiceConfig) => {
-    try {
-      const cfg = await fetchConfigForShell()
-      const voice = { ...(cfg?.voice as Record<string, unknown> || {}), ...voiceSectionForShell(next) }
-      await apiPost('/config', { voice })
-    } catch (e) {
-      console.error('[shell] 语音配置持久化失败（UI 已生效）:', e)
-    }
-  }, [])
-  const applyShellConfig = useCallback((patch: Partial<ShellVoiceConfig> | ((v: ShellVoiceConfig) => ShellVoiceConfig)) => {
-    const next = typeof patch === 'function' ? patch(shellConfigRef.current) : { ...shellConfigRef.current, ...patch }
-    shellConfigRef.current = next
-    setShellConfig(next)
-    void persistShellConfig(next)
-  }, [persistShellConfig])
 
   // 2026-08-14: 原 toggleContinuous/togglePttOnly 已合并进 cycleMicMode（三态循环按钮）
   const toggleMute = useCallback(() => {
@@ -2483,32 +2314,11 @@ export function VoiceShell() {
               数据全无时整条隐藏; 点击指标块经 handleCommandChip 直发追问 */}
           <MorningBriefingStrip onAsk={handleCommandChip} />
           {conversation.length === 0 ? (
-            <div className="voice-shell-chat-empty">
-              <div className="voice-shell-chat-empty-hint">
-                {/* P3(GUI 全量修复 P0): 提示按语音模式三态渲染——旧实现只分
-                    pttOnly/其他两态, live(实时)模式唤醒词已禁用却仍提示"说小螃蟹",
-                    用户照提示操作必然无反应 */}
-                {shellConfig.pttOnly
-                  ? '专注模式 · 按住空格键开始说话'
-                  : shellConfig.continuousMode
-                    ? '实时监听中 · 直接说话即可'
-                    : '说「小螃蟹」或直接输入文字开始对话'}
-              </div>
-              {!shellConfig.pttOnly && (
-                <div className="voice-shell-suggest">
-                  {SUGGESTED_PROMPTS.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      className="voice-shell-suggest-chip"
-                      onClick={() => handleCommandChip(s)}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <ChatEmptyState
+              pttOnly={shellConfig.pttOnly}
+              continuousMode={shellConfig.continuousMode}
+              onAsk={handleCommandChip}
+            />
           ) : (
             <div className="voice-shell-chat-messages" ref={chatMessagesRef} onScroll={handleChatScroll}>
               {/* 2026-08-14 ag-ui 二次分析: 移除 tool 角色 filter 死代码(tool 消息已不
@@ -2536,46 +2346,8 @@ export function VoiceShell() {
                   onFeedback={handleMessageFeedback}
                 />
               ))}
-              {/* 2026-08-14 C-1: 流式回复气泡——增量实时显示 + ▌ 光标, 定稿落卡后自动消失 */}
-              {streamingAiText !== '' && (
-                <div className="chatcard-msg chatcard-msg--ai chatcard-msg--streaming">
-                  <div className="chatcard-msg-avatar chatcard-msg-avatar--ai">
-                    <span className="chatcard-msg-avatar-letter">{agentDisplayName.charAt(0)}</span>
-                  </div>
-                  <div className="chatcard-msg-col">
-                    <div className="chatcard-msg-name chatcard-msg-name--ai">{agentDisplayName}</div>
-                    <div className="chatcard-msg-bubble chatcard-msg-bubble--md">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: chatMarkdownLink }}>{streamingAiText}</ReactMarkdown>
-                      <span className="chatcard-stream-cursor" aria-hidden="true">▌</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {/* 2026-09-20 圆桌会"正在输入"——顺序调度确定性: 排到谁发言即显示,
-                  生成完毕气泡弹出、语音接上。会议内容本体走 pushChat 署名气泡, 不再有独立卡片 */}
-              <style>{'@keyframes rtDot { 0%, 60%, 100% { opacity: .2 } 30% { opacity: 1 } }'}</style>
-              {roundtable.running && roundtable.typing && (
-                <div className="chatcard-msg chatcard-msg--ai">
-                  <span
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                      background: rtDeptColor(roundtable.typing.dept), color: '#fff', fontSize: 13, fontWeight: 600, opacity: 0.75,
-                    }}
-                  >
-                    {(roundtable.typing.name || '?').charAt(0)}
-                  </span>
-                  <div className="chatcard-msg-col">
-                    <div className="chatcard-msg-name chatcard-msg-name--ai">{roundtable.typing.name}</div>
-                    <div className="chatcard-msg-bubble" style={{ opacity: 0.7 }}>
-                      正在输入
-                      <span style={{ animation: 'rtDot 1.2s infinite' }}>·</span>
-                      <span style={{ animation: 'rtDot 1.2s infinite 0.2s' }}>·</span>
-                      <span style={{ animation: 'rtDot 1.2s infinite 0.4s' }}>·</span>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <StreamingBubble agentDisplayName={agentDisplayName} text={streamingAiText} />
+              <RtTypingIndicator running={roundtable.running} typing={roundtable.typing} />
               {/* 2026-08-14(DingDong CardStream 对齐): 工具结果卡片流——内嵌聊天流,
                   四态生命周期(running→done/fail→2.5s 淡出), 与右栏过程卡双轨并存 */}
               <ToolCardStream runs={flow.toolEvents} />
@@ -2594,108 +2366,30 @@ export function VoiceShell() {
           )}
         </div>
 
-        {/* 输入区：文本输入 + 发送（对齐参考实现图例: 橙点提示 + 橙色渐变发送按钮）
-            2026-08-19 P2 接管: 审批请求时输入区被接管——inline 审批卡嵌入输入区
-            上方, 输入框/发送按钮禁用直到审批解决(对齐 AG-UI dojo HITL 输入区接管) */}
-        <div className="voice-shell-chat-input-area voice-shell-chat-input-area--primary">
-          {/* 2026-09-20 圆桌会进行中横幅——此刻说话(打字/语音)=老板插话, 后端转交会场;
-              静音开关挂这里(会议内容已在对话流, 无独立卡片可放) */}
-          {roundtable.running && (
-            <div className="voice-shell-approval-banner" style={{ background: 'rgba(92,107,192,0.2)' }}>
-              <span className="voice-shell-approval-banner-dot" />
-              <span className="voice-shell-approval-banner-text" style={{ flex: 1 }}>
-                🪑 圆桌会进行中 · 此刻说话=老板插话，全场会听取{roundtable.goal ? `（议题：${roundtable.goal}）` : ''}
-              </span>
-              <button
-                type="button"
-                onClick={roundtable.toggleMuted}
-                title={roundtable.muted ? '开启语音播报' : '静音只看文字'}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 12, flexShrink: 0, padding: '0 4px' }}
-              >
-                {roundtable.muted ? '🔇 已静音' : '🔊 播报中'}
-              </button>
-            </div>
-          )}
-          {approvalPendingCount > 0 && (
-            <div className="voice-shell-approval-banner">
-              <span className="voice-shell-approval-banner-dot" />
-              <span className="voice-shell-approval-banner-text">
-                工具需要授权 · {approvalPendingCount} 个请求待处理(输入已暂停)
-              </span>
-            </div>
-          )}
-          <ApprovalHost variant="inline" onActiveChange={setApprovalPendingCount} />
-          {attachments.length > 0 && (
-            <div className="vs-attachments">
-              {attachments.map((a, i) => (
-                <span key={`${a.name}-${i}`} className="vs-attachment-chip" title={a.path || a.name}>
-                  📎 {a.name}{a.pending && uploadPct > 0 ? <span className="vs-upload-pct"> {uploadPct}%</span> : null}
-                  <button type="button" className="vs-attachment-remove" onClick={() => removeAttachment(i)}>✕</button>
-                </span>
-              ))}
-            </div>
-          )}
-          <div className="voice-shell-chat-input-row">
-            <button
-              type="button"
-              className="vs-attach-btn vs-attach-btn--round"
-              onClick={handlePickFiles}
-              disabled={uploading}
-              title="上传附件"
-              aria-label="上传附件"
-            >
-              {/* 2026-08-20: emoji 📎 换内联 SVG 回形针——emoji 在小按钮内跨平台
-                  渲染粗糙(彩色/位图), SVG stroke 随 currentColor, 与深色主题一致;
-                  上传中同图标旋转(不再用 ⏳) */}
-              <svg className={`vs-attach-icon${uploading ? ' vs-attach-icon--busy' : ''}`} viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-              </svg>
-            </button>
-            <input
-              className="voice-shell-chat-input-field"
-              ref={chatInputRef}
-              value={textInput}
-              onChange={(e) => setTextInput(e.target.value)}
-              /* 2026-08-14 ag-ui 二次分析: IME 组合守卫——拼音候选词确认回车不误发送
-                 (isComposing 为真时 Enter 属于输入法选词, 不触发提交)
-                 2026-08-19 修复: 改自跟踪 composingRef——原生 isComposing 在组合中途
-                 失焦后卡死为 true,回车永远被吞;ref + blur 取消后失焦即恢复可用 */
-              onCompositionStart={() => { composingRef.current = true }}
-              onCompositionEnd={() => { composingRef.current = false }}
-              onBlur={() => { composingRef.current = false }}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !composingRef.current) submitText() }}
-              /* 2026-08-25 界面对齐: placeholder 随语音模式给出常驻操作提示 */
-              placeholder={approvalPendingCount > 0
-                ? '审批处理中…'
-                : attachments.length > 0 ? '补充说明（可选）…'
-                : muted ? '语音已关闭 · 点击左侧语音球开启语音'
-                : shellConfig.pttOnly ? '␣ 按住空格键开始说话 · 或输入文字回车发送'
-                : shellConfig.continuousMode ? '实时监听中 · 直接说话 · 或输入文字回车发送'
-                : '⚡ 输入文字回车发送 · 空格说话或说唤醒词'}
-              disabled={uploading || approvalPendingCount > 0}
-            />
-            {/* 2026-08-14 ag-ui 二次分析: 生成中按钮合一为 ⏹ 停止(发送/停止切换,
-                停止后保留已收部分回复——useChatStream.abort 静默返回语义) */}
-            <button
-              type="button"
-              className={`voice-shell-chat-send-btn${isGenerating ? ' voice-shell-chat-send-btn--stop' : ''}`}
-              onClick={isGenerating ? flow.stopGenerating : submitText}
-              disabled={uploading || approvalPendingCount > 0}
-            >
-              {isGenerating ? <Square size={12} fill="currentColor" /> : <Send size={16} />}
-            </button>
-          </div>
-          <div className="voice-shell-chat-input-footer">
-            <span className="voice-shell-chat-input-footer-dot" />
-            {muted
-              ? '已静音 · 点击左侧语音球恢复声音'
-              : shellConfig.pttOnly
-                ? '按住空格键开始说话'
-                : shellConfig.continuousMode
-                  ? '实时监听中 · 直接说话即可'
-                  : '按住空格键开始说话'}
-          </div>
-        </div>
+        {/* 2026-09-21 P2-1: 输入区整体拆至 ./ChatInputArea（JSX 逐字搬移） */}
+        <ChatInputArea
+          roundtableRunning={roundtable.running}
+          roundtableGoal={roundtable.goal || ''}
+          roundtableMuted={roundtable.muted}
+          onToggleRoundtableMuted={roundtable.toggleMuted}
+          approvalPendingCount={approvalPendingCount}
+          onApprovalActiveChange={setApprovalPendingCount}
+          attachments={attachments}
+          uploadPct={uploadPct}
+          uploading={uploading}
+          onRemoveAttachment={removeAttachment}
+          onPickFiles={handlePickFiles}
+          textInput={textInput}
+          onTextInputChange={setTextInput}
+          inputRef={chatInputRef}
+          composingRef={composingRef}
+          onSubmit={submitText}
+          muted={muted}
+          pttOnly={shellConfig.pttOnly}
+          continuousMode={shellConfig.continuousMode}
+          isGenerating={isGenerating}
+          onStopGenerating={flow.stopGenerating}
+        />
         </div>
         </div>
       </main>
