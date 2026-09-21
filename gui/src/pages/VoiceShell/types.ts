@@ -19,6 +19,9 @@ export interface ChatMsg { role: 'user' | 'ai' | 'tool'; text: string; ts: numbe
 /** 单条工具事件（flow.toolEvents 元素）——工具链回看面板数据源 */
 export type FlowToolEvent = ReturnType<typeof useVoiceChatFlow>['toolEvents'][number]
 
+/** useVoiceChatFlow 返回实例——对话消息域 hook 的注入参数 */
+export type VoiceChatFlow = ReturnType<typeof useVoiceChatFlow>
+
 /** pushChat 签名单源——index.tsx 的 useCallback 与 useRoundtableChat hook 共用 */
 export type PushChatFn = (
   role: 'user' | 'ai' | 'tool',
