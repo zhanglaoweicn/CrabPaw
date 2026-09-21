@@ -34,7 +34,7 @@ import { useSceneSurfaces } from '../../lib/scene-client'
 import type { VoiceConfig } from '../../hooks/useVoiceReply'
 import { resolveVoiceStyle, resolveExpertTtsVoice } from '../../lib/expert-persona'
 import { matchPanelCommand, stripCommandPrefix, extractSongQuery, SUGGESTED_PROMPTS, detectExpertSummonCommand, detectExpertMeetingConfirmation } from '../../lib/voice-panel-commands'
-import { summonExpert, startDepartmentMeeting, fetchTeamPresets, fetchExpertDetail, fetchExpertsByDepartment, getCollabStatus } from '../../components/ExpertsPanel/api'
+import { summonExpert, fetchTeamPresets, fetchExpertDetail, fetchExpertsByDepartment } from '../../components/ExpertsPanel/api'
 import { deriveAgentFocus, deriveOrbMode, deriveOrbVolume } from '../../lib/voice-orb-state'
 import { interceptLocalVoiceCommand } from '../../lib/voiceCommands'
 import { isDevMode } from '../../lib/dev-mode'
@@ -48,6 +48,7 @@ import { SysInfoCard } from '../../components/SysInfoCard'
 import { fileUrlFor, isImageAttachment, formatFileSize } from '../../lib/attachment'
 import { isCardWallKind, loadDismissedKeys, saveDismissedKeys } from '../../lib/surface-utils'
 import { subscribeSse } from '../../lib/sse-hub'
+import { useRoundtableMeetings, rtDeptColor, type RtStatement, type RtIntervention, type RtConclusion, type RtDocument } from '../../hooks/useRoundtable'
 import { nextPhaseThreshold, phaseText, sceneFromPhase } from '../../lib/holo-phase'
 import { Minus, Square, X, Columns, RotateCcw, LayoutDashboard, History, Brush, ChevronDown, Send } from 'lucide-react'
 import { toast } from 'sonner'
@@ -412,7 +413,9 @@ export function VoiceShell() {
   // （后端 /chat files 协议形状一致：path/name/type/size）
   interface ChatMsgFile { path: string; name: string; size?: number; type?: string }
   // 2026-09-07: channel——消息来源通道标记（'wecom'=企业微信同步镜像），气泡带通道徽标
-  interface ChatMsg { role: 'user' | 'ai' | 'tool'; text: string; ts: number; toolId?: string; round?: number; files?: ChatMsgFile[]; channel?: 'wecom' | 'lark' }
+  // 2026-09-20: speaker——圆桌会专家署名（对话流内直接以专家身份出气泡，不建独立卡）
+  interface RtSpeaker { name: string; dept?: string; round?: number }
+  interface ChatMsg { role: 'user' | 'ai' | 'tool'; text: string; ts: number; toolId?: string; round?: number; files?: ChatMsgFile[]; channel?: 'wecom' | 'lark'; speaker?: RtSpeaker }
   const [conversation, setConversation] = useState<ChatMsg[]>([])
   const conversationRef = useRef<ChatMsg[]>([])
   // 2026-08-19 三栏联动轮: 轮次序号 + 最近一轮(用户消息落轮次, AI 落卡沿用)
@@ -421,13 +424,13 @@ export function VoiceShell() {
   // 2026-08-13: 消息反馈(P0-3)——按 ts 记录已反馈状态,失败回滚保持可点
   // (handleMessageFeedback 在 flow 声明之后定义,见 flow 下方)
   const [feedbackMap, setFeedbackMap] = useState<Map<number, 'up' | 'down'>>(new Map())
-  const pushChat = useCallback((role: 'user' | 'ai' | 'tool', text: string, toolId?: string, round?: number, files?: ChatMsgFile[], channel?: 'wecom' | 'lark') => {
+  const pushChat = useCallback((role: 'user' | 'ai' | 'tool', text: string, toolId?: string, round?: number, files?: ChatMsgFile[], channel?: 'wecom' | 'lark', speaker?: RtSpeaker) => {
     const clean = text?.trim() || ''
     if (!clean && (!files || files.length === 0)) return
     // 2026-08-13: ts 定位键——nextChatTs 单调唯一(点赞/点踩按 ts 定位,
     // 同 ms 任意数量连发不碰撞;此前仅查前一条,3 条以上同 ms 仍重复)
     const ts = nextChatTs()
-    const next = [...conversationRef.current, { role, text: clean, ts, toolId, round, files: files && files.length > 0 ? files : undefined, channel }]
+    const next = [...conversationRef.current, { role, text: clean, ts, toolId, round, files: files && files.length > 0 ? files : undefined, channel, speaker }]
     conversationRef.current = next
     setConversation(next)
   }, [])
@@ -475,6 +478,32 @@ export function VoiceShell() {
 
   // 2026-09-17: 语音对话通道——设置页切换, 缺省 classic(既有链路不动)
   const dialogChannel: 'classic' | 'realtime' = shellConfig.dialogChannel === 'realtime' ? 'realtime' : 'classic'
+
+  // 2026-09-20 圆桌会——多专家群聊式讨论：会议过程/内容直接以对话气泡进对话流
+  // （专家署名气泡/老板插话右侧气泡/结论任务收口消息），不再渲染独立圆桌卡。
+  // realtime 双工通道激活时自动静音（防双音/半双工原则），文字实时可读不受影响。
+  const roundtable = useRoundtableMeetings({
+    initialMuted: dialogChannel === 'realtime',
+    onStatement: useCallback((s: RtStatement) => {
+      pushChat('ai', s.failed ? '（该岗位本次未能发言）' : s.text, undefined, undefined, undefined, undefined, { name: s.expertName, dept: s.department, round: s.round })
+    }, [pushChat]),
+    onIntervention: useCallback((it: RtIntervention) => {
+      pushChat('user', it.text)
+    }, [pushChat]),
+    onBrief: useCallback((text: string) => {
+      pushChat('ai', `📊 会务组已实算会场数据简报，专家发言将以此为准：\n\n${text}`)
+    }, [pushChat]),
+    onConclusion: useCallback((c: RtConclusion, host: { name: string; department?: string } | null) => {
+      const taskLines = c.tasks.map((t) => `☐ ${t.owner}：${t.task}`).join('\n')
+      pushChat('ai', `✅ 会议收口\n\n${c.text}${taskLines ? `\n\n—— 任务清单 ——\n${taskLines}` : ''}`, undefined, undefined, undefined, undefined, { name: host ? `${host.name}（主持）` : '主持', dept: host?.department, round: 3 })
+    }, [pushChat]),
+    onDocument: useCallback((doc: RtDocument) => {
+      pushChat('ai', `📄 会议纪要已生成：${doc.name}（已出文件卡，可投递企微）`)
+    }, [pushChat]),
+    onEnded: useCallback((status: string, error?: string | null) => {
+      if (status !== 'done') pushChat('ai', `⚠️ 圆桌会异常中断：${error || '未知错误'}`)
+    }, [pushChat]),
+  })
 
   const flow = useVoiceChatFlow(voiceConfig, muted, handlePhase, {
     ttsMode: dialogChannel,
@@ -1548,7 +1577,7 @@ export function VoiceShell() {
               await pending.launch()
             } catch (e: any) {
               console.warn('[shell] 例会确认发车失败:', e?.message || e)
-              speech.enqueue({ id: `experts_${Date.now()}`, text: '例会启动失败，请稍后再试', kind: 'panel' })
+              speech.enqueue({ id: `experts_${Date.now()}`, text: '会议启动失败，请稍后再试', kind: 'panel' })
             }
           })()
           return
@@ -1571,7 +1600,10 @@ export function VoiceShell() {
         const say = (text: string, voice?: string) => speech.enqueue({ id: `experts_${Date.now()}`, text, kind: 'panel', ...(voice ? { voice } : {}) })
         try {
           if (summonHit.kind === 'department-meeting') {
-            // 组队确认环: 先提案阵容，等"开始/取消"应答再发车
+            // 组队确认环: 先提案阵容，等"开始/取消"应答再发车。
+            // 2026-09-20 二轮: 发车目标改圆桌会（roundtable，部门/班组模式）——统一会议
+            // 体验（两轮讨论+多音色+收口三件套，全程 SSE 进对话流）；提案同时上屏
+            // （此前只 TTS 播报，静音时零可见反馈——实测"发送后变空"的根因）。
             let goal = summonHit.goal || ''
             let roster: { name: string; voiceStyle?: string }[] = []
             let leadName = ''
@@ -1587,42 +1619,21 @@ export function VoiceShell() {
               roster = members.slice(0, 4).map(m => ({ name: m.name, voiceStyle: m.voiceStyle }))
             }
             if (!goal) goal = '部门工作例检：当前状况、主要问题与本周重点建议'
-            const label = summonHit.label || '部门例会'
+            const label = (summonHit.label || '部门例会').replace('例会', '圆桌会')
             if (roster.length === 0) { say(`${label}暂无在编岗位，无法召开`); return }
-            const params = summonHit.presetId
-              ? { presetId: summonHit.presetId, goal }
-              : { department: summonHit.departmentId!, goal }
+            const startParams: Record<string, unknown> = { goal, sessionId: 'voice_shell_user' }
+            if (summonHit.presetId) startParams.presetId = summonHit.presetId
+            else if (summonHit.departmentId) startParams.department = summonHit.departmentId
+            const rosterText = `${roster.map(r => r.name).join('、')}${leadName ? `（${leadName} 主持）` : ''}`
+            pushChat('ai', `🪑 ${label}提案：${goal}\n参会：${rosterText}。回复"开始"发车，"取消"作废。`)
             pendingMeetingRef.current = {
               label,
               expiresAt: Date.now() + 90000,
               launch: async () => {
-                const h = await startDepartmentMeeting(params)
-                say(`${h.departmentLabel}例会已开始，${h.lead?.name || '主管'}主持，${h.tasks.length} 位岗位分别分析中。每位完成会向我汇报，全部完成后我为您念纪要结论——纪要全文会显示在语音球下方，可以随时查看。`, resolveExpertTtsVoice(h.lead?.voiceStyle))
-                // P3: 例会进度轮询（15s×40≈10min, 与后端看门狗一致）——只负责检测
-                // 整场终态；成员完成不另行播报（CollabOrbit 的"X汇报"已覆盖，双通道
-                // 重复播报是 2026-09-06 用户反馈的叠音来源）。
-                let polled = 0
-                const poll = setInterval(async () => {
-                  polled++
-                  try {
-                    const st = await getCollabStatus(h.collabId)
-                    if (!st) return
-                    if (st.status !== 'running' && st.status !== 'synthesizing') {
-                      clearInterval(poll)
-                      if (st.status === 'done' && st.summary) {
-                        // 2026-09-06 三态分离·结论态: 例会纪要以消息形式进对话流
-                        //（markdown 原样渲染，永久留在会话历史里，不随浮卡收球消失）
-                        try {
-                          pushChat('ai', `📋 **${h.departmentLabel}例会结论**（主持：${h.lead?.name || '主管'}）\n\n${String(st.summary)}`)
-                        } catch (e) { console.warn('[shell] 例会纪要落卡失败:', e) }
-                        say(`${h.departmentLabel}例会完成。结论已整理进对话窗口，我念一下重点：${String(st.summary).replace(/[#*>]/g, '').slice(0, 220)}…`, resolveExpertTtsVoice(h.lead?.voiceStyle))
-                      } else {
-                        say(`${h.departmentLabel}例会已结束，但未产出有效汇总，详情请到任务面板查看。`)
-                      }
-                    }
-                  } catch { /* 轮询失败静默 */ }
-                  if (polled >= 40) clearInterval(poll)
-                }, 15000)
+                const res = await apiPost<{ meetingId: string; alreadyRunning?: boolean }>('/api/experts/roundtable/start', startParams)
+                if (!res || !res.success || !res.data) throw new Error((res && res.error) || '圆桌会启动失败')
+                say(`${label}已开始，${rosterText}。两轮讨论后主持收口，结论和纪要会直接落进对话窗口；会议期间您随时说话=插话，全场会听取。`, resolveExpertTtsVoice(roster[0]?.voiceStyle))
+                // 进度无需轮询——roundtable:* SSE 逐条发言/收口/文档驱动对话流（useRoundtableMeetings）
               },
             }
             say(`${label}提案：${goal}。我准备请 ${roster.map(r => r.name).join('、')} 参加${leadName ? `，由${leadName}主持` : ''}。开始吗？`, resolveExpertTtsVoice(roster[0]?.voiceStyle))
@@ -2600,7 +2611,19 @@ export function VoiceShell() {
                   onClick={m.round != null ? () => linkRound(m.round as number) : undefined}
                   title={m.role === 'user' ? '点击定位到时间线事件组' : undefined}
                 >
-                  {m.role === 'ai' ? (
+                  {m.role === 'ai' && m.speaker ? (
+                    /* 2026-09-20 圆桌会专家署名头像——部门七色圆徽, 悬停看姓名 */
+                    <span
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                        background: rtDeptColor(m.speaker.dept), color: '#fff', fontSize: 13, fontWeight: 600,
+                      }}
+                      title={m.speaker.name}
+                    >
+                      {(m.speaker.name || '?').charAt(0)}
+                    </span>
+                  ) : m.role === 'ai' ? (
                     <div className="chatcard-msg-avatar chatcard-msg-avatar--ai">
                       <span className="chatcard-msg-avatar-letter">
                         {/^(https?:|local:\/\/|\/)/.test(agentDisplayIcon)
@@ -2615,9 +2638,13 @@ export function VoiceShell() {
                   )}
                   <div className="chatcard-msg-col">
                     {m.role === 'ai' && (
-                      <div className="chatcard-msg-name chatcard-msg-name--ai">{agentDisplayName}{m.channel === 'wecom' ? '（企微）' : ''}</div>
+                      <div className="chatcard-msg-name chatcard-msg-name--ai">
+                        {m.speaker
+                          ? `${m.speaker.name}${m.speaker.round === 1 ? ' · 开场立场' : m.speaker.round === 2 ? ' · 交锋对齐' : ''}`
+                          : `${agentDisplayName}${m.channel === 'wecom' ? '（企微）' : ''}`}
+                      </div>
                     )}
-                    <div className={`chatcard-msg-bubble${m.role === 'tool' ? ' chatcard-msg-bubble--tool' : m.role === 'ai' ? ' chatcard-msg-bubble--md' : ''}`}>
+                    <div className={`chatcard-msg-bubble${m.role === 'tool' ? ' chatcard-msg-bubble--tool' : m.role === 'ai' && !m.speaker ? ' chatcard-msg-bubble--md' : ''}`}>
                       {/* 2026-08-21: 用户消息附件——图片缩略图 + 文件 chip，文本之前 */}
                       {m.role === 'user' && m.files && m.files.length > 0 && (
                         <div className="chatcard-attachments">
@@ -2648,7 +2675,9 @@ export function VoiceShell() {
                         </div>
                       )}
                       {m.role === 'ai'
-                        ? <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: chatMarkdownLink }}>{m.text}</ReactMarkdown>
+                        ? (m.speaker
+                          ? <span style={{ whiteSpace: 'pre-wrap' }}>{m.text}</span>
+                          : <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: chatMarkdownLink }}>{m.text}</ReactMarkdown>)
                         : m.text}
                     </div>
                     {/* 2026-08-14 ag-ui 二次分析: 消息时间戳(完成后才渲染) */}
@@ -2760,6 +2789,31 @@ export function VoiceShell() {
                   </div>
                 </div>
               )}
+              {/* 2026-09-20 圆桌会"正在输入"——顺序调度确定性: 排到谁发言即显示,
+                  生成完毕气泡弹出、语音接上。会议内容本体走 pushChat 署名气泡, 不再有独立卡片 */}
+              <style>{'@keyframes rtDot { 0%, 60%, 100% { opacity: .2 } 30% { opacity: 1 } }'}</style>
+              {roundtable.running && roundtable.typing && (
+                <div className="chatcard-msg chatcard-msg--ai">
+                  <span
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                      background: rtDeptColor(roundtable.typing.dept), color: '#fff', fontSize: 13, fontWeight: 600, opacity: 0.75,
+                    }}
+                  >
+                    {(roundtable.typing.name || '?').charAt(0)}
+                  </span>
+                  <div className="chatcard-msg-col">
+                    <div className="chatcard-msg-name chatcard-msg-name--ai">{roundtable.typing.name}</div>
+                    <div className="chatcard-msg-bubble" style={{ opacity: 0.7 }}>
+                      正在输入
+                      <span style={{ animation: 'rtDot 1.2s infinite' }}>·</span>
+                      <span style={{ animation: 'rtDot 1.2s infinite 0.2s' }}>·</span>
+                      <span style={{ animation: 'rtDot 1.2s infinite 0.4s' }}>·</span>
+                    </div>
+                  </div>
+                </div>
+              )}
               {/* 2026-08-14(DingDong CardStream 对齐): 工具结果卡片流——内嵌聊天流,
                   四态生命周期(running→done/fail→2.5s 淡出), 与右栏过程卡双轨并存 */}
               <ToolCardStream runs={flow.toolEvents} />
@@ -2782,6 +2836,24 @@ export function VoiceShell() {
             2026-08-19 P2 接管: 审批请求时输入区被接管——inline 审批卡嵌入输入区
             上方, 输入框/发送按钮禁用直到审批解决(对齐 AG-UI dojo HITL 输入区接管) */}
         <div className="voice-shell-chat-input-area voice-shell-chat-input-area--primary">
+          {/* 2026-09-20 圆桌会进行中横幅——此刻说话(打字/语音)=老板插话, 后端转交会场;
+              静音开关挂这里(会议内容已在对话流, 无独立卡片可放) */}
+          {roundtable.running && (
+            <div className="voice-shell-approval-banner" style={{ background: 'rgba(92,107,192,0.2)' }}>
+              <span className="voice-shell-approval-banner-dot" />
+              <span className="voice-shell-approval-banner-text" style={{ flex: 1 }}>
+                🪑 圆桌会进行中 · 此刻说话=老板插话，全场会听取{roundtable.goal ? `（议题：${roundtable.goal}）` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={roundtable.toggleMuted}
+                title={roundtable.muted ? '开启语音播报' : '静音只看文字'}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 12, flexShrink: 0, padding: '0 4px' }}
+              >
+                {roundtable.muted ? '🔇 已静音' : '🔊 播报中'}
+              </button>
+            </div>
+          )}
           {approvalPendingCount > 0 && (
             <div className="voice-shell-approval-banner">
               <span className="voice-shell-approval-banner-dot" />

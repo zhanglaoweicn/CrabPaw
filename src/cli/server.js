@@ -350,6 +350,15 @@ async function startServer(options = {}) {
   mediaNotifier.init({ wecom, lark }, broadcastEvent);
   console.log('📄 Media notification system initialized (WeCom+Lark+SSE)');
 
+  // 2026-09-20: 圆桌会纪要生成器装配（层契约 R1 依赖反转——core 不上溯 tools,
+  // 生成体在 tools/roundtable-doc.js, 此处注入）
+  try {
+    require('../core/experts/roundtable').setRoundtableDocGenerator(
+      require('../tools/roundtable-doc').generateRoundtableDoc
+    );
+  } catch (e) { console.warn('[server] 圆桌会文档生成器装配失败(纪要生成将跳过):', e.message); }
+  console.log('📄 Roundtable doc generator wired');
+
   const { startPerceptionLayer, globalProactiveEngine, globalSignalBus, globalCostSensor, globalSystemHealthSensor, globalUserBehaviorSensor, globalBusinessContextSensor, globalIntentPredictor, globalProactivePlanner, globalContextPreloader, globalStrategyOptimizer, globalAdaptiveTuner, initExperienceReplay, initKnowledgeGraphEvolver, globalEvolutionSandbox } = require('../core/perception');
 
   // P0-3: 经验回放启动——原代码 require 不存在的 getExperienceStore（experience-store

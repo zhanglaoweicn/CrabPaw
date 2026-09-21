@@ -472,7 +472,12 @@ function startSendServer() {
             msgtype = 'markdown';
           }
           let sendContent = content;
-          console.log(`📋 发送内容预览 (前500字符): ${content.substring(0, 500)}`);
+          // 2026-09-20: 出站文本剥离提示词内部段——LLM 偶发把带 [系统提示:…专家后缀]
+          // 的用户原话经发送工具发进企微, 回声弹回后既泄漏提示词又污染桌面镜像
+          if (typeof sendContent === 'string') {
+            sendContent = sendContent.replace(/\[系统提示:[\s\S]*?\]/g, '').trim();
+          }
+          console.log(`📋 发送内容预览 (前500字符): ${String(sendContent).substring(0, 500)}`);
           const msgBody = {};
           msgBody[msgtype] = { content: sendContent };
 
@@ -789,6 +794,13 @@ function startWecomClient() {
       const chatType = frame.body?.chattype || 'single';
       const msgId = frame.body?.msgid || '';
 
+      // 2026-09-20: 自回声抑制——本账号自己发出的消息会从回调流弹回, 曾被当
+      // 新消息走完整处理链并镜像到桌面(实测"主人"回声卡)。from=botId 一律丢弃。
+      if (botId && fromUserId && fromUserId === botId) {
+        console.log(`🔇 [自回声] 丢弃本账号消息: msgId=${msgId || '无'}, content=${content.substring(0, 50)}`);
+        return;
+      }
+
       console.log(`📨 收到企业微信文本消息: from=${fromUserId}, chat=${chatId}, content=${content.substring(0, 100)}`);
       updateWecomStatus(true);
 
@@ -817,6 +829,12 @@ function startWecomClient() {
       const msgId = frame.body?.msgid || '';
       const imageUrl = frame.body?.image?.url || '';
       const aesKey = frame.body?.image?.aeskey || '';
+
+      // 2026-09-20: 自回声抑制(同文本入口)——本账号自己的图片消息不处理
+      if (botId && fromUserId && fromUserId === botId) {
+        console.log(`🔇 [自回声] 丢弃本账号图片消息: msgId=${msgId || '无'}`);
+        return;
+      }
 
       console.log(`📨 收到企业微信图片消息: from=${fromUserId}`);
       updateWecomStatus(true);

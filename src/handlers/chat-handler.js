@@ -1161,6 +1161,30 @@ async function handleChat(req, res, ctx) {
   processedMessage += ']';
   }
 
+  // 2026-09-20 圆桌会自动触发：「专家们开个会讨论X」→ 召集相关专家圆桌讨论。
+  // 在 auto-collab 之前判定（圆桌是结构化会议，优先于泛协作）；命中后向
+  // processedMessage 追加系统提示，让主回复只做简短开场白，议题交给圆桌流程。
+  // 2026-09-20(二轮): 会议进行中——本条消息即"老板插话"转交会场（打字/语音
+  // 共用 /chat 通道），SSE 回声落为对话流用户气泡；主回复只做一句话确认。
+  try {
+  const rt = require('../core/experts/roundtable');
+  const rtRunning = rt.findRunning();
+  if (rtRunning) {
+    const iv = rt.interveneRoundtable(rtRunning.meetingId, processedMessage);
+    if (iv.ok) {
+      processedMessage += `\n\n[系统提示: 圆桌会议(会议号 ${rtRunning.meetingId})进行中，用户本条发言已作为"老板插话"转交会场，后续发言者会看到。请只用一句话确认已转达，不要分析或回答议题内容。]`;
+    }
+  } else {
+    const rtHandle = await rt.maybeAutoStartRoundtable(userId, processedMessage);
+    if (rtHandle && rtHandle.meetingId) {
+      const rtNames = [rtHandle.host, ...(rtHandle.members || [])].filter(Boolean).map((e) => e.name).join('、');
+      processedMessage += `\n\n[系统提示: 已为用户自动召开圆桌会议(会议号 ${rtHandle.meetingId})，议题「${rtHandle.goal}」，参会专家：${rtNames}。请只做一两句话的开场告知：会议已开始、参会专家名单、结论稍后自动呈报。不要自行分析或回答议题内容。]`;
+    }
+  }
+  } catch (rtErr) {
+  console.warn('⚠️ 圆桌会自动触发异常(不影响聊天):', rtErr?.message || rtErr);
+  }
+
   // 2026-08-15 T7(分部一): 意图命中「多专家协作」时自动发起专家协作。
   // 与 GUI 手动向导双入口；auto-collab 内部按同会话 running 状态幂等去重。
   try {

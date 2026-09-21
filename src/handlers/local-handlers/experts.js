@@ -84,6 +84,21 @@ async function handleExpertsAPI(req, res, _ctx) {
       if (pathParts[0] === 'stats') {
         return sendJson(res, 200, { success: true, data: experts.getStats() });
       }
+      // GET /api/experts/roundtable — 圆桌会列表
+      // GET /api/experts/roundtable/voices — 音色池/绑定/豆包可用性
+      // GET /api/experts/roundtable/:id — 会议全量状态（发言/插话/结论/文档）
+      if (pathParts[0] === 'roundtable') {
+        const rt = require('../../core/experts/roundtable');
+        if (pathParts[1] === 'voices') {
+          return sendJson(res, 200, { success: true, data: rt.getVoiceAssignments() });
+        }
+        if (pathParts.length === 1) {
+          return sendJson(res, 200, { success: true, data: rt.listRoundtables(20) });
+        }
+        const meeting = rt.getRoundtable(pathParts[1]);
+        if (!meeting) return sendJson(res, 404, { success: false, error: '会议不存在' });
+        return sendJson(res, 200, { success: true, data: meeting });
+      }
       const id = pathParts[0];
       const detail = experts.getExpert(id);
       if (!detail) return sendJson(res, 404, { success: false, error: '专家不存在' });
@@ -102,6 +117,27 @@ async function handleExpertsAPI(req, res, _ctx) {
         const result = experts.createExpert(body);
         if (result.error) return sendJson(res, 400, { success: false, error: result.error });
         return sendJson(res, 201, { success: true, data: result.expert });
+      }
+      // POST /api/experts/roundtable/start — 召开圆桌会 {goal, presetId?, department?, sessionId?}
+      // POST /api/experts/roundtable/:id/intervene — 老板插话 {text}
+      if (pathParts[0] === 'roundtable') {
+        const rt = require('../../core/experts/roundtable');
+        const body = await readJsonBody(req);
+        if (pathParts[1] === 'start') {
+          if (!body || !body.goal) return sendJson(res, 400, { success: false, error: '缺少会议议题 goal' });
+          try {
+            const r = await rt.startRoundtable(body, { sessionId: body.sessionId || null });
+            return sendJson(res, 200, { success: true, data: r });
+          } catch (e) {
+            return sendJson(res, 400, { success: false, error: e.message });
+          }
+        }
+        if (pathParts[1] && pathParts[2] === 'intervene') {
+          const r = rt.interveneRoundtable(pathParts[1], body && body.text);
+          if (!r.ok) return sendJson(res, 400, { success: false, error: `插话未生效: ${r.reason}` });
+          return sendJson(res, 200, { success: true, data: r });
+        }
+        return sendJson(res, 404, { success: false, error: '未知圆桌操作' });
       }
       if (pathParts[0] === 'route') {
         const body = await readJsonBody(req);
