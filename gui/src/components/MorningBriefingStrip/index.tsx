@@ -79,7 +79,7 @@ export function MorningBriefingStrip({ onAsk }: { onAsk: (text: string) => void 
       {hasSchedule && (
         <button
           type="button" style={blockStyle}
-          onClick={() => onAsk('打开今日日程')}
+          onClick={() => onAsk('打开日程')}
           title={(data.schedule!.items || []).map(i => i.title).filter(Boolean).join(' / ') || '今日日程'}
         >
           <span style={labelStyle}>日程</span>
