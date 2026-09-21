@@ -8,6 +8,7 @@
  */
 import { Send, Square } from 'lucide-react'
 import { ApprovalHost } from '../../components/ApprovalHost'
+import { TodayOutputRail } from '../../components/TodayOutputRail'
 
 export interface PendingAttachment {
   name: string
@@ -166,6 +167,7 @@ export function ChatInputArea({
             : continuousMode
               ? '实时监听中 · 直接说话即可'
               : '按住空格键开始说话'}
+        <TodayOutputRail />
       </div>
     </div>
   )

@@ -21,7 +21,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AmbientGlow } from '../../components/AmbientGlow'
 import { MorningBriefingStrip } from '../../components/MorningBriefingStrip'
-import { TodayOutputRail } from '../../components/TodayOutputRail'
 // ── 2026-09-21 P2-1 拆分: 语音配置域/对话类型/单条消息渲染移出主文件 ──
 import { useShellVoiceConfig } from './useShellVoiceConfig'
 import type { ChatMsg, ChatMsgFile } from './types'
@@ -2392,9 +2391,6 @@ export function VoiceShell() {
         onResume={handleHistoryResume}
       />
 
-      {/* 2026-09-21 创新-C: 今日产出轴——右下折叠徽标列今天生成的文档产物,
-          无今日产物自隐藏(fixed 定位, 不占对话流布局) */}
-      <TodayOutputRail />
     </div>
   )
 }

@@ -1,15 +1,18 @@
 /**
- * TodayOutputRail — 今日产出轴（2026-09-21 创新-C）
+ * TodayOutputRail — 今日产出胶囊（2026-09-21 创新-C；同日按用户反馈移位）
  *
- * 解决老板"我要找上午那份东西"的高频诉求：对话流右侧折叠徽标
- * 「📦 今日产出 N」，展开列出今天登记的文档产物（doc-artifacts 注册表），
- * 点击条目用系统默认程序打开（electronAPI.shell.openPath）。
+ * 解决老板"我要找上午那份东西"的高频诉求：列出今天登记的文档产物
+ * （doc-artifacts 注册表），点击条目用系统默认程序打开。
+ *
+ * 位置（v2，用户反馈"右下角浮层遮挡消息阅读"）：从 fixed 右下浮层改为
+ * 嵌入输入区 footer 右侧的紧凑胶囊——不遮任何内容；展开列表从输入区
+ * 上方弹出（absolute 定位，用户主动展开的临时遮挡可接受）。
  *
  * 数据源：GET /api/doc-artifacts（filegen 产物注册表，登记即有；前端按
  * 本地日键过滤今天——口径与 usage-stats localDayKey 修复一致）。
  * 无今日产物整条不渲染（诚实降级）。
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { apiGet } from '../../lib/api'
 import { formatFileSize } from '../../lib/attachment'
 
@@ -73,30 +76,34 @@ export function TodayOutputRail() {
   }, [])
 
   const count = items?.length ?? 0
-
-  const railStyle = useMemo<React.CSSProperties>(() => ({
-    position: 'fixed', right: 16, bottom: 96, zIndex: 60,
-    display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
-    pointerEvents: 'none',
-  }), [])
-
   if (count === 0) return null
 
+  // footer 右侧锚点：relative 容器承载上弹列表
+  const anchorStyle: React.CSSProperties = {
+    position: 'relative', marginLeft: 'auto', display: 'inline-flex', flexShrink: 0,
+  }
   const listStyle: React.CSSProperties = {
-    pointerEvents: 'auto',
-    maxHeight: 320, overflowY: 'auto', minWidth: 240, maxWidth: 320,
+    position: 'absolute', bottom: 'calc(100% + 10px)', right: 0, zIndex: 60,
+    maxHeight: 300, overflowY: 'auto', minWidth: 240, maxWidth: 320,
     borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)',
-    background: 'rgba(18,20,28,0.92)', backdropFilter: 'blur(10px)',
-    padding: 8, boxShadow: '0 8px 28px rgba(0,0,0,0.45)',
+    background: 'rgba(18,20,28,0.94)', backdropFilter: 'blur(10px)',
+    padding: 6, boxShadow: '0 8px 28px rgba(0,0,0,0.45)',
+    display: 'flex', flexDirection: 'column', gap: 2,
   }
   const rowStyle: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 8, width: '100%',
     padding: '6px 8px', borderRadius: 8, border: 'none', textAlign: 'left',
     background: 'transparent', color: 'rgba(255,255,255,0.85)', cursor: 'pointer', fontSize: 12,
   }
+  const chipStyle: React.CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    padding: '2px 9px', borderRadius: 10, fontSize: 11, cursor: 'pointer',
+    border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.55)',
+    background: 'transparent',
+  }
 
   return (
-    <div style={railStyle} data-testid="today-output-rail">
+    <span style={anchorStyle} data-testid="today-output-rail">
       {expanded && (
         <div style={listStyle}>
           {items!.map((a, i) => (
@@ -124,17 +131,14 @@ export function TodayOutputRail() {
         type="button"
         onClick={() => setExpanded(v => !v)}
         style={{
-          pointerEvents: 'auto',
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '6px 12px', borderRadius: 16, fontSize: 12, cursor: 'pointer',
-          border: '1px solid rgba(255,255,255,0.14)', color: 'rgba(255,255,255,0.85)',
-          background: 'rgba(18,20,28,0.9)', boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+          ...chipStyle,
+          ...(expanded ? { color: 'rgba(255,255,255,0.85)', borderColor: 'rgba(255,255,255,0.22)' } : {}),
         }}
         title="今天生成的文档产物"
       >
         📦 今日产出 <span style={{ fontWeight: 700 }}>{count}</span>
         <span style={{ opacity: 0.6 }}>{expanded ? '▾' : '▸'}</span>
       </button>
-    </div>
+    </span>
   )
 }
