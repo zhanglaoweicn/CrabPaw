@@ -317,10 +317,14 @@ export function VoiceShell() {
       enqueue('已切换到默认模式，唤醒词与空格对话可用')
     } else {
       // 默认 → 专注（仅空格）
+      // 2026-09-22: 专注模式下 dialogChannel 运行时强制 classic(useShellVoiceConfig)——
+      // realtime 全双工与「仅按住空格」不兼容(见 hook 内注释)
       applyShellConfig(v => ({ ...v, pttOnly: true, continuousMode: false, wakeWordEnabled: false }))
-      enqueue('已切换到专注模式，仅按住空格说话')
+      enqueue(shellConfig.dialogChannel === 'realtime'
+        ? '已切换到专注模式，仅按住空格说话。实时全双工通道与专注模式暂不兼容，已临时使用经典语音通道，退出专注自动恢复'
+        : '已切换到专注模式，仅按住空格说话')
     }
-  }, [shellConfig.pttOnly, shellConfig.continuousMode, applyShellConfig])
+  }, [shellConfig.pttOnly, shellConfig.continuousMode, shellConfig.dialogChannel, applyShellConfig])
 
   // P5.5: 共享播报队列（面板确认播报 + CollabOrbit 协作播报共用，防双音）
   // 2026-08-14: 播报队列跟随用户 TTS 配置(音色/语速)——此前 hook 内硬编码

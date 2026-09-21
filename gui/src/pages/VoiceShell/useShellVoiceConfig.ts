@@ -141,7 +141,15 @@ export function useShellVoiceConfig() {
   // 2026-08-15: muted 派生自 shellConfig(持久化)——重启后保持静音
   const muted = shellConfig.muted === true
   // 2026-09-17: 语音对话通道——classic=ASR+TTS 接力; realtime=豆包全双工端到端
-  const dialogChannel: 'classic' | 'realtime' = shellConfig.dialogChannel === 'realtime' ? 'realtime' : 'classic'
+  // 2026-09-22 用户实测: 专注模式(pttOnly)与 realtime 不兼容——切专注会停掉 realtime
+  // 常驻会话(effectiveContinuous=false→stopSession), 之后每次按空格都是冷启动建连
+  // (豆包 WS 握手+凭证 1-2s), 按住说话的时长内连接未就绪, 语音上行全丢="按了没反应"。
+  // 且 realtime 协议无 PTT 门控帧(mute/unmute 是播报回灌防护, 非 PTT 门控), 正解需改
+  // useVoiceSession(现挂用户 WIP)。故专注模式下运行时强制 classic(经典 PTT 管线是
+  // 专注模式原生场景), 配置项不动, 退出专注自动恢复 realtime。
+  const dialogChannel: 'classic' | 'realtime' = shellConfig.pttOnly
+    ? 'classic'
+    : shellConfig.dialogChannel === 'realtime' ? 'realtime' : 'classic'
 
   // ── 单源化写入通道：乐观更新本地 state + 异步 POST /api/config（合并 voice 段） ──
   // 写入失败仅 console.error，不阻塞交互（UI 已乐观更新，重启后可能回退到旧值）
