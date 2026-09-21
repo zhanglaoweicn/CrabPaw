@@ -544,6 +544,23 @@ export function VoiceShell() {
     () => stageSurfaces.filter(s => !dismissedIds.has(dismissKey(s))),
     [stageSurfaces, dismissedIds, dismissKey],
   )
+  // 2026-09-22: GPU 幽灵层清扫扩面——此前只挂 dismissSurface(手动关卡)与 SideSheet
+  // 关闭, 用户实测"ShowWeather 工具后底部输入区/顶部卡被暗层盖住"仍复现: 场景卡由
+  // 后端 scene/remove 或 surface 替换离场时不走 dismiss, 残留合成层无清扫。改为
+  // 监听可见 surface 集合——任何 surface 离开渲染(关闭/替换/清空)即延迟清扫,
+  // 覆盖全部离场路径(与 dismissSurface 内的清扫幂等, 重复触发无害)。
+  const prevSurfaceIdsRef = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    // 用 surface.id 而非 dismissKey(id@data)——data 更新(天气定时刷新)会变 key,
+    // 误判为离场导致周期性无谓清扫; 只有 id 消失才是真离场
+    const ids = new Set(visibleSurfaces.map(s => s.id))
+    const prev = prevSurfaceIdsRef.current
+    prevSurfaceIdsRef.current = ids
+    if (prev === null) return // 首帧只建立基线
+    for (const k of prev) {
+      if (!ids.has(k)) { sweepCompositorDeferred(600); break }
+    }
+  }, [visibleSurfaces])
   // 2026-08-20 弹卡治理: 对话窗口卡片墙不渲染纯文本 kind(text/info)。
   // reminder/proactive 的文本卡此前以裸文本形式出现在 holo-stage 卡片墙,
   // 属"临时文本卡片"。过滤后提醒消息仍走对话流(AI 消息),不再以卡片出现。
