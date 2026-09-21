@@ -11,6 +11,7 @@
  * 接口约定与原实现逐字一致：state 初始值、effect 依赖数组、console 文案均不变。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { apiPost } from '../../lib/api'
 import { subscribeSse } from '../../lib/sse-hub'
 import type { ChatMsg, ChatMsgFile, RtSpeaker, RtDecisionCard, FlowToolEvent, VoiceChatFlow } from './types'
@@ -176,8 +177,13 @@ export function useChatMessages(flow: VoiceChatFlow) {
 
   // 2026-08-13: 消息反馈(P0-3)——点赞/点踩落 audit-log,反哺模型调优
   const handleMessageFeedback = useCallback((m: ChatMsg, rating: 'up' | 'down') => {
-    if (feedbackMap.has(m.ts)) return
+    if (feedbackMap.has(m.ts)) {
+      // 2026-09-21 用户实测: 重复点击静默 return 毫无感知——显式提示已反馈过
+      toast.info('这条已经反馈过了，谢谢！')
+      return
+    }
     setFeedbackMap(prev => { const next = new Map(prev); next.set(m.ts, rating); return next })
+    toast.success(rating === 'up' ? '收到：有帮助' : '收到：会改进')
     apiPost('/api/chat/message-feedback', {
       conversationId: flow.getConversationId(),
       messageTs: m.ts,
@@ -186,6 +192,7 @@ export function useChatMessages(flow: VoiceChatFlow) {
     }).catch((err) => {
       console.error('[shell] 消息反馈发送失败:', err)
       setFeedbackMap(prev => { const next = new Map(prev); next.delete(m.ts); return next })
+      toast.error('反馈记录失败')
     })
   }, [feedbackMap, flow])
 
