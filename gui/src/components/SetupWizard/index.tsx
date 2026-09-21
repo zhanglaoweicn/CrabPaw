@@ -228,7 +228,6 @@ export function SetupWizard({ onComplete, onStartService }: SetupWizardProps) {
 
   // TTS
   const [ttsKey, setTtsKey] = useState('')
-  const [showTtsKey, setShowTtsKey] = useState(false)
   const [ttsDetected, setTtsDetected] = useState<DetectedTTS | null>(null)
   const [ttsExtra, setTtsExtra] = useState<Record<string, string>>({})
   const [ttsVoice, setTtsVoice] = useState('')
@@ -533,8 +532,15 @@ export function SetupWizard({ onComplete, onStartService }: SetupWizardProps) {
       setStep('wakeword')
 
     } catch (e: any) {
-      setStatus('连接失败: ' + (e.message || '未知错误'))
-      setStatusType('err')
+      const msg = String(e?.message || e || '')
+      // 2026-09-22: 后端尚在启动窗口时(service:start 拉起需要数秒)会抛 fetch 类
+      // 网络错误——直接显示 "连接失败: Failed to fetch" 对新手是惊吓(会误以为
+      // 软件坏了)。识别为网络类 → 中性文案引导稍候重试, 不标红。
+      const isNetwork = /Failed to fetch|ECONNREFUSED|NetworkError|fetch failed|ERR_CONNECTION/i.test(msg)
+      setStatus(isNetwork
+        ? '核心服务正在启动（约需 5-10 秒），请稍候再点一次「激活」'
+        : '连接失败: ' + (msg || '未知错误'))
+      setStatusType(isNetwork ? '' : 'err')
     } finally {
       setActivating(false)
     }
@@ -707,33 +713,38 @@ export function SetupWizard({ onComplete, onStartService }: SetupWizardProps) {
         {/* ── 可选分隔 ── */}
         <SectionDivider>可选 · 可不填</SectionDivider>
 
-        {/* ── STT ── */}
+        {/* ── 语音 Key（2026-09-22 合并）──
+            原为"语音识别 Key"+"语音合成 Key"两个框, 但豆包语音 Key 是同一把
+            (UUID 格式), 用户需填两次同一个值且困惑"是不是要两个"。合并为单框:
+            一次输入同时驱动 ASR/TTS 两个识别, 写入各自配置字段
+            (volcAsrApiKey / doubaoKey, 后端契约不变)。 */}
         <div style={{ marginBottom: 12 }}>
-          <Row label="语音识别 Key">
+          <Row label="语音 Key">
             <div style={{ position: 'relative', flex: 1 }}>
               <input
                 type={showSttKey ? 'text' : 'password'}
                 value={sttKey}
-                onChange={e => setSttKey(e.target.value)}
-                placeholder="粘贴 Key 自动识别厂商"
+                onChange={e => { setSttKey(e.target.value); setTtsKey(e.target.value) }}
+                placeholder="粘贴豆包语音 Key（识别与合成共用这一把）"
                 spellCheck={false}
                 autoComplete="off"
                 style={{
                   width: '100%', boxSizing: 'border-box', border: 'none', background: 'transparent',
-                  color: 'var(--text-primary)', padding: '11px 80px 11px 0', fontSize: 14, outline: 'none',
+                  color: 'var(--text-primary)', padding: '11px 110px 11px 0', fontSize: 14, outline: 'none',
                 }}
               />
               <button onClick={() => setShowSttKey(!showSttKey)}
                 style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
                 {showSttKey ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
-              {sttDetected && (
+              {(sttDetected || ttsDetected) && (
                 <span style={{ position: 'absolute', right: 34, top: '50%', transform: 'translateY(-50%)', padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, color: '#7dd8f5', background: 'rgba(100,200,245,0.12)', border: '1px solid rgba(100,200,245,0.25)', whiteSpace: 'nowrap' }}>
-                  {sttDetected.label}
+                  {sttDetected?.label || ttsDetected?.label}
                 </span>
               )}
             </div>
           </Row>
+          <RowHint>识别与合成为同一把 Key（语音识别 + 语音播报）</RowHint>
           {sttDetected?.configFields.filter(f => f.key !== sttDetected.configFields[0].key).map(f => (
             <Row key={f.key} label={f.label}>
               <input type="text" value={sttExtra[f.key] || ''} onChange={e => setSttExtra(prev => ({ ...prev, [f.key]: e.target.value }))}
@@ -741,35 +752,6 @@ export function SetupWizard({ onComplete, onStartService }: SetupWizardProps) {
                 style={{ flex: 1, border: 'none', background: 'transparent', color: 'var(--text-primary)', padding: '10px 0', fontSize: 13, outline: 'none' }} />
             </Row>
           ))}
-        </div>
-
-        {/* ── TTS ── */}
-        <div style={{ marginBottom: 16 }}>
-          <Row label="语音合成 Key">
-            <div style={{ position: 'relative', flex: 1 }}>
-              <input
-                type={showTtsKey ? 'text' : 'password'}
-                value={ttsKey}
-                onChange={e => setTtsKey(e.target.value)}
-                placeholder="粘贴 Key 自动识别厂商"
-                spellCheck={false}
-                autoComplete="off"
-                style={{
-                  width: '100%', boxSizing: 'border-box', border: 'none', background: 'transparent',
-                  color: 'var(--text-primary)', padding: '11px 80px 11px 0', fontSize: 14, outline: 'none',
-                }}
-              />
-              <button onClick={() => setShowTtsKey(!showTtsKey)}
-                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
-                {showTtsKey ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-              {ttsDetected && (
-                <span style={{ position: 'absolute', right: 34, top: '50%', transform: 'translateY(-50%)', padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, color: '#7dd8f5', background: 'rgba(100,200,245,0.12)', border: '1px solid rgba(100,200,245,0.25)', whiteSpace: 'nowrap' }}>
-                  {ttsDetected.label}
-                </span>
-              )}
-            </div>
-          </Row>
           {ttsDetected?.voiceOptions && ttsDetected.voiceOptions.length > 0 && (
             <Row label="音色">
               <select value={ttsVoice} onChange={e => setTtsVoice(e.target.value)}
@@ -1054,7 +1036,10 @@ export function SetupWizard({ onComplete, onStartService }: SetupWizardProps) {
         {step === 'kiosk' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 16, paddingBottom: 16 }}>
             <div style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.6 }}>
-              一体机部署提示：
+              <strong>这一步可以跳过</strong>——直接点下方「完成，进入 CrabPaw」即可。
+              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                以下仅面向「一体机 / 前台常驻设备」场景，普通电脑使用无需设置：
+              </div>
               <ul style={{ margin: '8px 0 0 18px', padding: 0, color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.8 }}>
                 <li>全屏待机：以 <code>--kiosk</code> 参数启动（部署手册有说明）</li>
                 <li>触摸操作：按住屏幕中央的球即可说话（PTT）</li>
