@@ -981,9 +981,11 @@ async function handleChat(req, res, ctx) {
  userId = requestUserId;
  } else if (syncMode === 'lark_sync' && userConfig.larkUserId) {
  userId = userConfig.larkUserId;
- } else if (syncMode === 'wecom_sync' && userConfig.wecomUserId) {
- userId = userConfig.wecomUserId;
  }
+ // 2026-09-22 用户决策: 电脑端与企微会话身份分离——wecom_sync 模式不再把 GUI
+ // 请求的 userId 覆盖为 wecomUserId(此前电脑端与企微共享同一条上下文流, 话题
+ // 互相污染)。企微消息走 _processChannelMessage 独立路径, 身份不受影响。
+ // GUI 请求 userId 落默认 'gui_user'(或 body 的 requestUserId)。
 
  // AG-UI resume 契约(interrupts.mdx): 客户端以新 run 携带 resume 数组恢复被 interrupt
  // 的审批——翻译为 approval.respond; 幂等(重复 resume 返回 success+alreadyResolved)。
@@ -1660,16 +1662,9 @@ async function handleChat(req, res, ctx) {
  broadcastEvent('gui_reply', { roundId, userId, content: fullReply, timestamp: Date.now() });
  }
 
- // 同步到频道（Electron→频道 方向，与 _processChannelMessage 的频道→Electron 方向互补）
- if (fullReply && syncMode === 'wecom_sync' && channels.includes('wecom') && userConfig.wecomUserId && ctx.wecom && ctx.wecom.isConfigured()) {
- try {
- const wecomReply = cleanReplyForUser(fullReply, true);
- await ctx.wecom.send(userConfig.wecomUserId, wecomReply, 'single');
- console.log('📡 [GUI→企微] 流式回复已同步:', wecomReply.substring(0, 50));
- } catch (syncErr) {
- console.warn('⚠️ [GUI→企微] 流式回复同步失败:', syncErr.message);
- }
- }
+ // 2026-09-22 用户决策: 电脑端对话不再自动回发企微——对答通道对称原则
+ // (企微问→答回企微; 电脑问→留在电脑端)。需要推送时显式说"发到企微"走企微发送工具。
+ // 恢复方法: git show 83d3cde 之前的 chat-handler.js 1664 行附近有原回发块。
  if (fullReply && syncMode === 'lark_sync' && channels.includes('lark') && userConfig.larkUserId && ctx.lark && typeof ctx.lark.isConfigured === 'function' && ctx.lark.isConfigured()) {
  try {
  await ctx.lark.send(userConfig.larkUserId, fullReply);
@@ -1721,15 +1716,7 @@ async function handleChat(req, res, ctx) {
  return sendError(res, 500, `Chat failed: ${chatErr.message}`);
  }
 
- if (reply && syncMode === 'wecom_sync' && channels.includes('wecom') && userConfig.wecomUserId && ctx.wecom && ctx.wecom.isConfigured()) {
- try {
- const wecomReply = cleanReplyForUser(reply, true);
- await ctx.wecom.send(userConfig.wecomUserId, wecomReply, 'single');
- console.log('📡 [GUI→企微] 回复已同步:', wecomReply.substring(0, 50));
- } catch (syncErr) {
- console.warn('⚠️ [GUI→企微] 回复同步失败:', syncErr.message);
- }
- }
+ // 2026-09-22: 同上——电脑端对话不自动回发企微(单向同步, 见上一处注释)。
  if (reply && syncMode === 'lark_sync' && channels.includes('lark') && userConfig.larkUserId && ctx.lark && typeof ctx.lark.isConfigured === 'function' && ctx.lark.isConfigured()) {
  try {
  await ctx.lark.send(userConfig.larkUserId, reply);
