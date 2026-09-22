@@ -45,11 +45,15 @@ const SOURCE_TREE_PATTERNS = [
   /\.(log|db|db-shm|db-wal)$/,
   // 用户运行时数据(2026-09-21, 隐私+体积): 协作会话/检查点/业务注册表/审计/
   // 用量/配置实体均属开发机运行残留, 发行种子不应携带(首启播种本就排除它们)。
-  // 放 SOURCE_TREE 而非 GLOBAL: collabs/backups/config.json 等名字在第三方
-  // npm 包内合法常见, 对 node_modules 应用会误伤数万条目。
-  /(^|\/)(collabs|checkpoints|assessment|backups|business)($|\/)/,
-  /(^|\/)(usage-stats|audit-log|awakening-cache|expert-stats)\.json$/,
-  /(^|\/)config\.json(\..*)?$/,
+  // 放 SOURCE_TREE 而非 GLOBAL: collabs/backups 等名字在第三方 npm 包内合法常见,
+  // 对 node_modules 应用会误伤数万条目。
+  // 2026-09-22 修正: 必须限定在 data/ 下——源码树里也有同名目录
+  // (resources/src/core/business/ 等), 裸目录名会把产品代码当违禁文件拦下。
+  /(^|\/)data\/(collabs|checkpoints|assessment|backups|business)($|\/)/,
+  // 2026-09-22: 以下文件名规则同样限定 data/ 下——技能包自带 config.json
+  // (skills/*/config.json, 4 个产品必需) 此前被裸文件名规则误拦。
+  /(^|\/)data\/(usage-stats|audit-log|awakening-cache|expert-stats)\.json$/,
+  /(^|\/)data\/config\.json(\..*)?$/,
 ]
 const VIOLATION_PATTERNS = [...GLOBAL_PATTERNS, ...SOURCE_TREE_PATTERNS]
 

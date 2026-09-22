@@ -163,6 +163,8 @@ try {
     $readme = @"
 CrabPaw $ver 免安装版(U 盘随身版)
 =====================================
+【推荐先看】同目录《开箱指引.html》——双击打开, 六步图文教程(插盘/启动/配 Key/说话)
+
 使用说明:
   1. 推荐解压到 U 盘根目录(如 E:\CrabPaw), 不要放在多层文件夹里
   2. 双击 CrabPaw.exe 启动(首次启动需播种默认数据, 稍慢属正常)
@@ -206,6 +208,22 @@ pause
     Write-Step "5c/7 包内文档清扫"
     node (Join-Path $ProjectRoot "scripts\clean-package-docs.js") $UnpackedDir
     if ($LASTEXITCODE -ne 0) { throw "包内文档清扫失败" }
+
+    # 5d/7 客户指引注入(2026-09-22): 开箱指引/版本更新指引——只随 U 盘与微信交付包
+    # 分发, 不进 GitHub 公开仓(已 gitignore)。放在清扫之后: 这两份是"客户可见"的
+    # 官方文档; 洁净度不冲突(.html 不在清扫与门禁的拦截规则内, 后者只拦 .md/.markdown)。
+    Write-Step "5d/7 注入客户指引"
+    $guideDir = Join-Path $ProjectRoot "docs\commercial"
+    if (Test-Path $guideDir) {
+        $guides = @(Get-ChildItem -LiteralPath $guideDir -Filter "*.html")
+        foreach ($g in $guides) {
+            Copy-Item -LiteralPath $g.FullName -Destination $UnpackedDir -Force
+            Write-Host "[OK] 客户指引: $($g.Name)" -ForegroundColor Green
+        }
+        if ($guides.Count -eq 0) { Write-Host "[WARN] docs\commercial 下无 HTML 指引" -ForegroundColor Yellow }
+    } else {
+        Write-Host "[WARN] 未找到 docs\commercial——跳过客户指引注入(不影响打包)" -ForegroundColor Yellow
+    }
 
     # 6/7 洁净度门禁(目录 -> zip -> zip 清单), 任一命中即失败
     Write-Step "6/7 洁净度门禁"
