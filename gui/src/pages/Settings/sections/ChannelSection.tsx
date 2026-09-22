@@ -134,7 +134,7 @@ export function ChannelSection({
                 onChange={(e) => setUserConfig(prev => ({ ...prev, syncMode: e.target.value as 'gui_user' | 'lark_sync' | 'wecom_sync' }))}
                 className="theme-input"
               >
-                <option value="gui_user">独立模式 - 使用独立会话历史</option>
+                <option value="gui_user">独立模式 - 使用独立会话历史（推荐）</option>
                 <option value="lark_sync">飞书同步 - 与飞书端共享会话</option>
               </select>
             </div>
@@ -188,8 +188,8 @@ export function ChannelSection({
                 onChange={(e) => setUserConfig(prev => ({ ...prev, syncMode: e.target.value as 'gui_user' | 'lark_sync' | 'wecom_sync' }))}
                 className="theme-input"
               >
-                <option value="gui_user">独立模式 - 使用独立会话历史</option>
-                <option value="wecom_sync">企业微信同步 - 与企业微信端共享会话</option>
+                <option value="gui_user">独立模式 - 使用独立会话历史（推荐）</option>
+                <option value="wecom_sync">企业微信同步 - 企微消息镜像到电脑端，回复回企微（会话与电脑端各自独立，电脑端对话不推送企微）</option>
               </select>
             </div>
             <div className="flex items-start gap-2 p-3 rounded-lg bg-[var(--bg-secondary)]">
