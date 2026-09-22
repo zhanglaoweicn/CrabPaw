@@ -971,7 +971,18 @@ const { buildVolatileContext } = require('./context-builder');
 
 async function prepareChatContext(config, userId, message, options = {}) {
  const startTime = Date.now();
- const { isStream = false, historyLimit = 20, enableGatewayPreCheck = false, onCompressed = null, onMemoryPrompt = null, enableShouldBlockLog = false, sessionId = null } = options;
+ // 2026-09-22 完整版: historyLimit 未显式传入时按模型窗口动态解析(context-window-guard)——
+ // 固定 20 条对 128K 模型利用率不足 1/4, 对 4K 小窗口模型又可能盲发溢出。
+ // 显式传入(内部子任务 20/10)优先, 行为不变。
+ const {
+ isStream = false,
+ historyLimit: historyLimitOption,
+ enableGatewayPreCheck = false,
+ onCompressed = null,
+ onMemoryPrompt = null,
+ enableShouldBlockLog = false,
+ sessionId = null,
+ } = options;
 
  globalLoopDetector.reset(userId);
 
@@ -1113,11 +1124,16 @@ async function prepareChatContext(config, userId, message, options = {}) {
  }));
 
  // 2026-08-13 P2-4: sessionId 非空时复合缓存键 + 按会话过滤历史
- const historyCacheKey = sessionId ? `${userId}:${sessionId}` : userId;
+ // 2026-09-22 完整版: 历史条数按模型窗口动态(窗口×0.45÷每条均摊900, clamp 8~120)——
+ // 超预算长尾由 prepareAndCompressContext 的窗口守卫/主压缩兜底(既有机制)。
+ const { resolveDynamicHistoryLimit } = require('./context-window-guard');
+ const historyLimit = historyLimitOption ?? resolveDynamicHistoryLimit({ provider, modelId: model });
+ const historyCacheKey = sessionId ? `${userId}:${sessionId}:${historyLimit}` : `${userId}:${historyLimit}`;
  const userHistory = await contextCache.getHistory(
  historyCacheKey,
  () => history.getRecentMessages(userId, historyLimit, sessionId)
  );
+ console.log(`📚 [上下文] 历史携带 ${historyLimit} 条上限 (窗口 ${(() => { try { const i = require('./context-window-guard').resolveContextWindowInfo({ provider, modelId: model }); return i && i.tokens > 0 ? i.tokens : 128000; } catch { return 128000; } })()})`);
  
  let timeContext = `\n\n${globalTimeAwareness.buildTimePrompt()}`;
  if (!isStream && userHistory.length > 0) {

@@ -314,10 +314,43 @@ class ContextWindowGuard {
 
 const globalContextWindowGuard = new ContextWindowGuard();
 
+/**
+ * resolveDynamicHistoryLimit — 按模型上下文窗口动态解析历史携带条数（2026-09-22 完整版）
+ *
+ * 此前固定 historyLimit=20：对 128K 模型利用率不足 1/4（大窗口能力浪费），
+ * 对 4K 小窗口模型又可能盲发溢出。本函数按窗口联动：
+ *   历史预算 = 窗口 × historyRatio（默认 0.45——system/工具结果/输出占其余）
+ *   条数 = 历史预算 ÷ 每条均摊 token（avgTokensPerMessage，默认 900）
+ *   clamp [minLimit=8, maxLimit=120]
+ * 超出预算的长尾由 prepareAndCompressContext 的窗口守卫/主压缩兜底（既有机制）。
+ */
+function resolveDynamicHistoryLimit(params = {}) {
+  const {
+    provider, modelId, modelContextTokens, modelContextWindow, defaultTokens,
+    historyRatio = 0.45,
+    avgTokensPerMessage = 900,
+    minLimit = 8,
+    maxLimit = 120,
+  } = params;
+
+  const info = resolveContextWindowInfo({
+    provider,
+    modelId,
+    modelContextTokens,
+    modelContextWindow,
+    defaultTokens: defaultTokens || CONTEXT_WINDOW_FALLBACK_TOKENS,
+  });
+  const windowTokens = info && info.tokens > 0 ? info.tokens : (defaultTokens || CONTEXT_WINDOW_FALLBACK_TOKENS);
+  const avg = avgTokensPerMessage > 0 ? avgTokensPerMessage : 900;
+  const raw = Math.floor((windowTokens * historyRatio) / avg);
+  return Math.max(minLimit, Math.min(maxLimit, raw));
+}
+
 module.exports = {
   ContextWindowGuard,
   globalContextWindowGuard,
   resolveContextWindowInfo,
+  resolveDynamicHistoryLimit,
   evaluateContextWindowGuard,
   resolveContextWindowGuardThresholds,
   CONTEXT_WINDOW_HARD_MIN_TOKENS,
