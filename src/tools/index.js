@@ -79,6 +79,8 @@ require('./turn-trace-tool');
 require('./capability-secret-tool');
 require('./concept-time-tool');
 require('./multimodal-tools');
+// 2026-09-24: MCP 连接器对话式配置向导（金蝶专线 M1）——查询侧/变更侧双工具
+require('./mcp-connect-tools');
 
 // 2026-08-01: 接线权限策略系统（此前 PermissionSystem 从未接入 registry）
 const { permissionSystem } = require('./permissions');

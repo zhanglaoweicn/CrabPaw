@@ -113,6 +113,16 @@ const CORE_TOOLSETS = {
     icon: '🎵',
   },
 
+  // 2026-09-24: MCP 连接器向导同款断层预防——McpConnect/McpConnectManage toolset='mcp'，
+  // 若无 CORE_TOOLSETS 键+平台列表引用，活跃集非空时会被过滤到 LLM 看不见
+  // （scene/panel/media 同因三先例）。4 个平台列表均已启用。
+  mcp: {
+    label: '业务连接器',
+    description: 'MCP 连接器向导与已接入的外部业务系统',
+    toolsets: ['mcp'],
+    icon: '🔌',
+  },
+
   // 2026-08-18 P0-1 修复：以下 15 个工具集此前无 CORE_TOOLSETS 键——PLATFORM_TOOLSETS
   // 与意图路由（tool-router.js）虽引用了这些 toolset 值名（travel/data/memory/ui…），
   // 但激活时 getToolset() 找不到键 → 抛"工具集不存在"被静默吞掉 → buildToolDefinitions
@@ -211,7 +221,7 @@ const CORE_TOOLSETS = {
   observability: {
     label: '可观测性',
     description: 'turn trace 等调试追踪',
-    toolsets: ['observability'],
+    toolsets: ['observability', 'mcp'],
     icon: '📡',
   },
 };
@@ -263,22 +273,22 @@ const PLATFORM_TOOLSETS = {
   cli: {
     label: 'CLI 平台',
     description: '命令行界面可用工具集',
-    toolsets: ['file', 'terminal', 'web', 'browser', 'desktop', 'multimodal', 'workflow', 'skills', 'interaction', 'calendar', 'scene', 'panel', 'media', 'general', 'stock', 'travel', 'ui', 'email', 'document', 'trending', 'platform', 'harness', 'agent', 'network', 'data', 'filesystem', 'memory', 'observability'],
+    toolsets: ['file', 'terminal', 'web', 'browser', 'desktop', 'multimodal', 'workflow', 'skills', 'interaction', 'calendar', 'scene', 'panel', 'media', 'general', 'stock', 'travel', 'ui', 'email', 'document', 'trending', 'platform', 'harness', 'agent', 'network', 'data', 'filesystem', 'memory', 'observability', 'mcp'],
   },
   'api-server': {
     label: 'API Server 平台',
     description: 'OpenAI 兼容端点可用工具集',
-    toolsets: ['file', 'terminal', 'web', 'workflow', 'skills', 'interaction', 'calendar', 'scene', 'panel', 'media', 'general', 'stock', 'travel', 'ui', 'email', 'document', 'trending', 'platform', 'harness', 'agent', 'network', 'data', 'filesystem', 'memory', 'observability'],
+    toolsets: ['file', 'terminal', 'web', 'workflow', 'skills', 'interaction', 'calendar', 'scene', 'panel', 'media', 'general', 'stock', 'travel', 'ui', 'email', 'document', 'trending', 'platform', 'harness', 'agent', 'network', 'data', 'filesystem', 'memory', 'observability', 'mcp'],
   },
   lark: {
     label: '飞书平台',
     description: '飞书消息平台可用工具集',
-    toolsets: ['file', 'web', 'messaging', 'workflow', 'skills', 'interaction', 'calendar', 'scene', 'panel', 'media', 'general', 'stock', 'travel', 'ui', 'email', 'document', 'trending', 'platform', 'harness', 'agent', 'network', 'data', 'filesystem', 'memory', 'observability'],
+    toolsets: ['file', 'web', 'messaging', 'workflow', 'skills', 'interaction', 'calendar', 'scene', 'panel', 'media', 'general', 'stock', 'travel', 'ui', 'email', 'document', 'trending', 'platform', 'harness', 'agent', 'network', 'data', 'filesystem', 'memory', 'observability', 'mcp'],
   },
   wecom: {
     label: '企业微信平台',
     description: '企业微信平台可用工具集',
-    toolsets: ['file', 'web', 'messaging', 'workflow', 'skills', 'interaction', 'calendar', 'scene', 'panel', 'media', 'general', 'stock', 'travel', 'ui', 'email', 'document', 'trending', 'platform', 'harness', 'agent', 'network', 'data', 'filesystem', 'memory', 'observability'],
+    toolsets: ['file', 'web', 'messaging', 'workflow', 'skills', 'interaction', 'calendar', 'scene', 'panel', 'media', 'general', 'stock', 'travel', 'ui', 'email', 'document', 'trending', 'platform', 'harness', 'agent', 'network', 'data', 'filesystem', 'memory', 'observability', 'mcp'],
   },
 };
 

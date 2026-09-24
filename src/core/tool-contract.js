@@ -1382,4 +1382,18 @@ function registerIntoRegistry(r){
 function generateCoverageReport(tools){const c=Object.keys(TOOL_CONTRACTS);const cov=tools.filter(n=>c.includes(n));const unc=tools.filter(n=>!c.includes(n));return{covered:cov,uncovered:unc,contractCount:c.length,registeredCount:tools.length,coverage:tools.length>0?(cov.length/tools.length*100).toFixed(1)+"%":"0%"}}
 function getContractsByRiskLevel(){const g={high:{},medium:{},low:{}};for(const[n,c]of Object.entries(TOOL_CONTRACTS))g[c.riskLevel||"low"][n]=c;return g}
 
+// ── 2026-09-24: MCP 连接器对话式向导（金蝶专线 M1, src/tools/mcp-connect-tools.js）──
+TOOL_CONTRACTS.McpConnect = {
+  description: "MCP connector wizard (query): catalog=connector directory, inspect=setup guide and required info, probe=status and tool list of connected server",
+  whenNotToUse: ["Query-only; install/configure/remove go through McpConnectManage"],
+  schema: { type: "object", properties: { action: { type: "string", enum: ["catalog", "inspect", "probe"] }, connector: { type: "string" }, url: { type: "string" } }, required: ["action"], additionalProperties: false },
+  maxTimeout: 60000, riskLevel: "medium", validate: null
+};
+TOOL_CONTRACTS.McpConnectManage = {
+  description: "MCP connector wizard (mutate, user-approved each call): install=download connector package, configure=validate credentials + write config + hot connect, remove=detach",
+  whenNotToUse: ["Never call configure with missing/invalid credentials (handler returns missing fields)", "Query actions go through McpConnect"],
+  schema: { type: "object", properties: { action: { type: "string", enum: ["install", "configure", "remove"] }, connector: { type: "string" }, credentials: { type: "object", additionalProperties: true } }, required: ["action", "connector"], additionalProperties: false },
+  maxTimeout: 360000, riskLevel: "high", validate: null
+};
+
 module.exports={TOOL_CONTRACTS,getToolContract,validateToolInput,getAllContracts,registerToolContract,registerIntoRegistry,generateCoverageReport,getContractsByRiskLevel,LEGACY_SNAKE_ALIASES,LEGACY_KEBAB_ALIASES,ajv};

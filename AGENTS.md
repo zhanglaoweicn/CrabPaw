@@ -9,13 +9,13 @@ workflow engine, skill system, and the Harness framework.
 <!-- BEGIN GENERATED: harness-facts (scripts/harness-facts.js — npm run facts:write 更新 / facts:check 校验; 请勿手改数字) -->
 | 事实 | 实测值 | 单一事实源 |
 |---|---|---|
-| 工具契约主键 | 250 | src/core/tool-contract.js → TOOL_CONTRACTS |
+| 工具契约主键 | 252 | src/core/tool-contract.js → TOOL_CONTRACTS |
 | 契约遗留别名 | 24（snake 22 + kebab 2） | 同上 → LEGACY_SNAKE/KEBAB_ALIASES |
-| 契约键合计 | 274 | 上两行之和 |
+| 契约键合计 | 276 | 上两行之和 |
 | 审计事件类型 | 43 | src/core/audit-log-v2.js → AUDIT_EVENTS |
 | Eval 套件 / 用例 | 59 / 462 | evals/suite-registry.js |
 | PROMPT_VERSION | 未检出（代码中无常量，版本记录见 HARNESS.md 提示词版本表） | src/core/system-prompt.js |
-<!-- 生成时间: 2026-09-21T13:05:39.979Z -->
+<!-- 生成时间: 2026-09-24T09:11:20.125Z -->
 <!-- END GENERATED: harness-facts -->
 
 1. **Tool as Contract** — All tools defined as contracts in `src/core/tool-contract.js`（工具与契约数量以下方生成块为准；单源化自动对齐，以 `npm run plugin:verify` / tool-contract.js 实际输出为准）

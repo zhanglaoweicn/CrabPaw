@@ -81,14 +81,18 @@ git push gitee codex/biz-cards-foundation
 git push gitee "refs/tags/v$ver"
 
 # ── 5. 同步公开快照仓(linker-publish) ──
-# git archive 导出 HEAD 提交树(未提交内容不进版), 临时 tar 中转(PS 管道会文本化二进制流)
-Write-Host "`n[4/6] 同步公开快照仓(linker-publish)" -ForegroundColor Cyan
-$LP = "D:\linker-publish"
-if (Test-Path $LP) {
-  $tarTmp = Join-Path $env:TEMP "crabpaw-release-tree.tar"
-  git archive --format=tar -o $tarTmp HEAD
-  tar -xf $tarTmp -C $LP
-  Remove-Item $tarTmp -Force
+  # git archive 导出 HEAD 提交树(未提交内容不进版), 临时 tar 中转(PS 管道会文本化二进制流)
+  # 2026-09-24 修复: 固定用系统自带 bsdtar——从 git-bash 环境启动时 PATH 里 MSYS GNU tar
+  # 会把 "D:\linker-publish" 的盘符冒号当远程主机语法, 报 "Cannot connect to C:" 静默失败,
+  # 脚本误判"无差异"跳过同步; 并补 tar 退出码检查
+  Write-Host "`n[4/6] 同步公开快照仓(linker-publish)" -ForegroundColor Cyan
+  $LP = "D:\linker-publish"
+  if (Test-Path $LP) {
+    $tarTmp = Join-Path $env:TEMP "crabpaw-release-tree.tar"
+    git archive --format=tar -o $tarTmp HEAD
+    & "$env:SystemRoot\System32\tar.exe" -xf $tarTmp -C $LP
+    if ($LASTEXITCODE -ne 0) { throw "快照仓 tar 解压失败 (exit $LASTEXITCODE)" }
+    Remove-Item $tarTmp -Force
   Push-Location $LP
   git add -A
   $hasChanges = git status --porcelain
