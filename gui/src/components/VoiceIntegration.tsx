@@ -28,6 +28,7 @@ import { applyDuckVolume } from '../lib/voice-engine-utils'
 import { setTtsVolume } from '../lib/tts-state'
 // P2(GUI 全量修复): 唤醒会话窗口内放行自动发送(修复"唤醒后说话永不发送 LLM" P0)
 import { isWakeActive, shouldAutoSend } from '../lib/voice-auto-send'
+import { registerCommandHost } from '../lib/ui-command-registry'
 
 // P5(GUI 全量修复 P1): 读取 Settings 麦克风选择(localStorage 'mic-device-id',
 // 与 useVoiceSession 同一键)——usePushToTalk 需要同一设备
@@ -46,10 +47,17 @@ function readMicDeviceId(): string | undefined {
 function readTTSVol(): number {
   const analyser = (window as any).__ttsAnalyser as AnalyserNode | undefined
 
-  // v8: 如果标记了使用模拟音量（没有 createMediaElementSource），用正弦波模拟
-  if ((window as any).__ttsUseSimulatedVolume && (window as any).__ttsActive) {
-    // 模拟 TTS 播放时的音量：0.3~0.8 的正弦波 + 随机扰动
-    return 0.45 + Math.sin(Date.now() / 180) * 0.25 + (Math.random() - 0.5) * 0.1
+  // v8: 如果标记了使用模拟音量（没有 createMediaElementSource），用合成包络模拟
+  // 2026-09-23 球体动感增强: 原实现是单一 5.5Hz 正弦（0.45±0.25）——球看起来像
+  // "匀速抖动"，不像有人在说话。改为 音节节拍(≈4.6/秒) × 短句起伏(≈0.42Hz) × 抖动
+  // 的合成包络: 值域约 0.27~0.90，听起来仍是合成值（真实振幅要 WebAudio analyser，
+  // 那是一次独立取舍），但节奏与句子的长短起伏对上了，球才有"边说边被拉扯"的观感。
+  if ((window as any).__ttsUseSimulatedVolume && ((window as any).__ttsActive || (window as any).__rtSpeaking)) {
+    const t = Date.now() / 1000
+    const syllable = 0.5 + 0.5 * Math.sin(t * 2 * Math.PI * 4.6)   // 音节节拍
+    const phrase = 0.62 + 0.38 * Math.sin(t * 2 * Math.PI * 0.42)  // 短句起伏
+    const jitter = (Math.random() - 0.5) * 0.12                    // 打破机械感
+    return Math.max(0, Math.min(1, 0.18 + 0.66 * phrase * (0.55 + 0.45 * syllable) + jitter))
   }
 
   if (!analyser) return 0
@@ -260,6 +268,11 @@ export function VoiceIntegration({
   // 2026-09-05 空格 PTT 体验修复: down 已成功开麦的标记——up 时据此无条件收麦
   // (静音自动解除后 mutedRef 时序不可靠, 防麦克风泄漏)
   const pttStartedRef = useRef(false)
+  // 2026-09-24 会客厅(S1): PTT 的按下/松开逻辑抽成 ref 持有——键盘空格与"球上按住"
+  // 触摸共用同一入口（下面的 keydown/keyup 只是薄包装）。此前逻辑内联在 keydown 里，
+  // 触摸无法复用，而一体机没有键盘，部署手册写着的"按住球说话"因此根本走不通。
+  const pttDownRef = useRef<() => void>(() => {})
+  const pttUpRef = useRef<() => void>(() => {})
   pttStartRef.current = ptt.startRecording
   pttStopRef.current = ptt.stopRecording
   pttCancelRef.current = ptt.cancelRecording
@@ -289,16 +302,8 @@ export function VoiceIntegration({
     const pttAllowedInEditable = (el: HTMLElement) => {
       return !(el as HTMLInputElement).value
     }
-    const down = (e: KeyboardEvent) => {
-      if (e.code !== 'Space' || e.repeat) return
-      // 2026-09-03 诊断(空格 PTT 失效排查): bail 时必留日志——此前 isEditable/muted
-      // 静默 return,现场零痕迹无法定位(台风卡摊开后空格失效问题的排查切口)
-      const ed = editableEl(e.target)
-      if (ed && !pttAllowedInEditable(ed)) {
-        console.log('[Voice] PTT 忽略 Space: 焦点在输入框且有内容/合成中')
-        return
-      }
-      e.preventDefault()
+    // ── 共享按下逻辑（键盘与触摸共用；触摸路径在下方经命令注册表 'ptt'.start 调用）──
+    pttDownRef.current = () => {
       if (mutedRef.current) {
         // 2026-09-05 修复: 静音态按空格=主动要说话 → 自动解除语音总开关并继续 PTT
         // (此前静默 return 且无任何提示——"开机空格没反应"的小白陷阱)
@@ -345,14 +350,22 @@ export function VoiceIntegration({
       } catch (err: any) { console.warn('[Voice] releaseMicForPtt 异常(直接开麦):', err?.message || err) }
       pttStartRef.current()
     }
-    const up = (e: KeyboardEvent) => {
-      if (e.code !== 'Space') return
-      // 与 down 同口径: 空输入框放行(按住期间说过话), 有内容/合成中让给打字
-      // 2026-09-05: down 已成功开麦时无条件收麦(静音自动解除后 mutedRef 时序不可靠)
-      const started = pttStartedRef.current
+    // ── 键盘包装：空格键（空输入框放行——有内容/合成中让给打字）──
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || e.repeat) return
+      // 2026-09-03 诊断(空格 PTT 失效排查): bail 时必留日志——此前 isEditable/muted
+      // 静默 return,现场零痕迹无法定位(台风卡摊开后空格失效问题的排查切口)
       const ed = editableEl(e.target)
-      if (!started && ed && !pttAllowedInEditable(ed)) return
+      if (ed && !pttAllowedInEditable(ed)) {
+        console.log('[Voice] PTT 忽略 Space: 焦点在输入框且有内容/合成中')
+        return
+      }
       e.preventDefault()
+      pttDownRef.current()
+    }
+    // ── 共享松开逻辑（键盘与触摸共用）──
+    pttUpRef.current = () => {
+      const started = pttStartedRef.current
       if (!started && mutedRef.current) return
       pttStartedRef.current = false
       // ── 2026-09-17: 实时通道分支——松手=强制判停, 模型接话(无独立 PTT 管线需收尾) ──
@@ -366,6 +379,16 @@ export function VoiceIntegration({
       pttStopRef.current()
       sessionRef.current.restoreMicAfterPtt()
       sessionRef.current.resumeSession()
+    }
+    // ── 键盘包装：空格抬起 ──
+    const up = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return
+      // 与 down 同口径: 空输入框放行(按住期间说过话), 有内容/合成中让给打字
+      // 2026-09-05: down 已成功开麦时无条件收麦(静音自动解除后 mutedRef 时序不可靠)
+      const ed = editableEl(e.target)
+      if (!pttStartedRef.current && ed && !pttAllowedInEditable(ed)) return
+      e.preventDefault()
+      pttUpRef.current()
     }
     // 失焦兜底：按住空格时切窗口（keyup 丢失）→ 取消录音 + 恢复会话，不误发
     const onBlur = () => {
@@ -387,6 +410,24 @@ export function VoiceIntegration({
       window.removeEventListener('keyup', up)
       window.removeEventListener('blur', onBlur)
     }
+  }, [])
+
+  // ── 2026-09-24 会客厅(S1): 触摸 PTT 通道 ──
+  // 一体机没有键盘，"按住球说话"只能从球上的指针手势来。经命令注册表暴露（同
+  // approvalHost / taskPanel / musicSearch 的既有模式，不用 window 全局），
+  // 球按住 → start、松手 → stop，复用上面同一套按下/松开逻辑（含静音自动解除、
+  // 实时通道 rtCommit、releaseMicForPtt 抢占处理），不复制语义。
+  useEffect(() => {
+    const unregister = registerCommandHost('ptt', {
+      start: () => {
+        try { pttDownRef.current() } catch (e) { console.error('[Voice] 触摸 PTT 启动失败:', e) }
+      },
+      stop: () => {
+        try { pttUpRef.current() } catch (e) { console.error('[Voice] 触摸 PTT 结束失败:', e) }
+      },
+      active: () => pttStartedRef.current,
+    })
+    return () => { unregister() }
   }, [])
 
   // ── 唤醒词 ──
@@ -520,21 +561,41 @@ export function VoiceIntegration({
   const lastEmittedVolTsRef = useRef(0)
   useEffect(() => {
     const volTick = setInterval(() => {
-      if ((window as any).__ttsActive) {
+      // 2026-09-24: 实时通道播报也算"在说"——实时对话的声音来自双工 WS（模型自带嗓音），
+      // 不走 TTS 队列，但球体同样要变蓝并跟着起伏（此前实时播报时球毫无反应，与空格/
+      // 经典通道不一致；状态本身由 useVoiceSession 的 __rtSpeaking 广播）。
+      const rtSpeaking = (window as any).__rtSpeaking === true
+      const ttsActive = (window as any).__ttsActive === true
+      if (ttsActive || rtSpeaking) {
         const raw = readTTSVol()
         // lerp 平滑，避免球体跳动过于剧烈
         lastTTSVolRef.current = lastTTSVolRef.current * 0.65 + raw * 0.35
+        // 2026-09-23 球体动感增强: 播报期球体终于"跟着嗓音动"。
+        // 此前 TTS 音量只经 setTtsVolume 喂了音乐卡的音量条，而球的 volume prop
+        // （deriveOrbVolume 只读 ASR/KWS 电平）在播报期恒为 0 → 蓝色脉冲光晕强度恒定、
+        // 球在说话却毫无起伏。这里走与聆听期同一个视觉通道（VoiceOrb 直写 ref，
+        // 不触发 React 重渲染）。
+        // 喂的是未平滑的 raw：球内部自带非对称包络（45ms 快起/260ms 慢落，见
+        // lib/orb-dynamics），这里再叠一层 τ≈170ms 的 lerp 只会把攻击拖钝；
+        // 平滑值仍旧供音乐卡音量条使用（行为不变）。
+        try {
+          window.dispatchEvent(new CustomEvent('crabpaw:voice-energy-fast', { detail: raw }))
+        } catch (e) {
+          console.warn('[Voice] 球体能量广播失败:', (e as any)?.message || e)
+        }
         // 2026-08-07(整树重渲染修复): 阈值之外再加 >150ms 降频——updateState 每次
         // dispatch 新 state 对象 → 所有 useVoiceState 消费方重渲染;旧实现阈值 0.02
         // 在正弦模拟音量下几乎每 60ms 都超阈值 → ~16次/s 重渲染(审查报告 P2)。
         // 150ms 门控降到 ~6次/s,球体动画 16fps 足够
         const now = Date.now()
-        if (now - lastEmittedVolTsRef.current > 150
+        if (ttsActive
+          && now - lastEmittedVolTsRef.current > 150
           && Math.abs(lastTTSVolRef.current - lastEmittedVolRef.current) > 0.02) {
           lastEmittedVolTsRef.current = now
           lastEmittedVolRef.current = lastTTSVolRef.current
           // P5(GUI 全量修复 P1): 旧实现 updateState 全树广播(~6次/秒 React 重渲染,
           // 唯一消费者是音乐卡假音量条)。改走 tts-state pub-sub 订阅通道。
+          // 2026-09-24: 实时通道不写这个通道（音乐卡音量条只跟 TTS）
           setTtsVolume(lastEmittedVolRef.current)
         }
       } else if (lastTTSVolRef.current > 0.001) {
@@ -542,6 +603,13 @@ export function VoiceIntegration({
         lastEmittedVolRef.current = 0
         lastEmittedVolTsRef.current = 0
         setTtsVolume(0)
+        // 2026-09-23: 播报结束立即把球放平（否则球会"冻"在最后一声上，靠 300ms
+        // 陈旧阈值兜底才回落）
+        try {
+          window.dispatchEvent(new CustomEvent('crabpaw:voice-energy-fast', { detail: 0 }))
+        } catch (e) {
+          console.warn('[Voice] 球体能量归零广播失败:', (e as any)?.message || e)
+        }
       }
     }, 60) // ~16fps，足够驱动球体动画
     return () => clearInterval(volTick)

@@ -86,7 +86,14 @@ body.side-sheet-media .sfc {
 }
 
 @keyframes sfc-in {
-  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  /* 2026-09-24 会客厅轮修复: 只动 opacity。
+     原实现 from 里带 transform，而卡片位置正是靠 inline 的 translate(x,y) 定的——
+     动画期间的 transform 会整体替换定位（动画 origin 高于 inline 样式），于是每张卡
+     上屏的头 0.4s 是"从左上角飞进来，再瞬移到正确位置"。实测 computed transform 恒为
+     matrix(0.98,0,0,0.98,0,10)（入场首帧）而 inline 是 translate(24px,88px)，两者冲突；
+     在被遮挡/后台的渲染进程里动画被节流时，卡甚至会一直停在左上角。
+     入场观感以淡入为主，不再碰定位。 */
+  from { opacity: 0; }
   to { opacity: 1; }
 }
 

@@ -609,6 +609,32 @@ describe('语音审批命令（2026-08-12 P2 杂项 5a）', () => {
   })
 })
 
+describe('演示模式语音命令（2026-09-22 体验层）', () => {
+  test('打开类措辞命中 open', () => {
+    expect(matchPanelCommand('演示模式')).toEqual({ kind: 'present', action: 'open' })
+    expect(matchPanelCommand('打开演示模式')).toEqual({ kind: 'present', action: 'open' })
+    expect(matchPanelCommand('进入演示模式')).toEqual({ kind: 'present', action: 'open' })
+    expect(matchPanelCommand('开始演讲模式')).toEqual({ kind: 'present', action: 'open' })
+    expect(matchPanelCommand('投屏模式')).toEqual({ kind: 'present', action: 'open' })
+  })
+  test('退出类措辞命中 close（不是 toggle——未开启时不该反而打开）', () => {
+    expect(matchPanelCommand('退出演示模式')).toEqual({ kind: 'present', action: 'close' })
+    expect(matchPanelCommand('关闭投屏模式')).toEqual({ kind: 'present', action: 'close' })
+    expect(matchPanelCommand('结束演示模式')).toEqual({ kind: 'present', action: 'close' })
+    expect(matchPanelCommand('退出投屏')).toEqual({ kind: 'present', action: 'close' })
+  })
+  test('"帮我打开演示模式" 经 stripCommandPrefix 归一后命中（语音链路同款）', () => {
+    expect(matchPanelCommand(stripCommandPrefix('帮我打开演示模式'))).toEqual({ kind: 'present', action: 'open' })
+    expect(matchPanelCommand(stripCommandPrefix('请退出演示模式'))).toEqual({ kind: 'present', action: 'close' })
+  })
+  test('裸词与无关说法不误伤（须带"模式"或"退出投屏"完整式）', () => {
+    expect(matchPanelCommand('演示')).toBeNull()
+    expect(matchPanelCommand('投屏')).toBeNull()
+    expect(matchPanelCommand('演示模式是什么')).toBeNull()
+    expect(matchPanelCommand('投屏到电视')).toBeNull()
+  })
+})
+
 describe('搜索命令（2026-08-12 搜索落地 4a）', () => {
   test('帮我找 X / 找文件 / 搜索文档 / 查找资料 命中 search', () => {
     expect(matchPanelCommand('帮我找合同')).toEqual({ kind: 'search', action: 'open' })

@@ -1,5 +1,42 @@
 import { deriveAgentFocus, deriveOrbMode, deriveOrbVolume } from './voice-orb-state'
 
+// 2026-09-24 会客厅轮(P5): 待批准 → 琥珀慢脉冲（唯一需要老板出手的状态要能在球上看见）
+describe('deriveOrbMode 待批准态', () => {
+  const base2 = {
+    muted: false, ttsPlaying: false, isSpeaking: false, queuePlaying: false,
+    pending: false, voiceSessionActive: false, wakeArmed: false,
+    continuousMode: false, pttOnly: false,
+  }
+
+  test('有审批 → waiting（压过聆听/思考）', () => {
+    expect(deriveOrbMode({ ...base2, pendingApprovals: 1 })).toBe('waiting')
+    expect(deriveOrbMode({ ...base2, pendingApprovals: 2, pending: true, wakeArmed: true })).toBe('waiting')
+  })
+
+  test('审批为 0 / 缺省 → 不影响既有语义', () => {
+    expect(deriveOrbMode({ ...base2, pendingApprovals: 0, pending: true })).toBe('thinking')
+    expect(deriveOrbMode({ ...base2, wakeArmed: true })).toBe('listening')
+  })
+
+  test('静音优先于待批准（关麦时球仍是定格白球）', () => {
+    expect(deriveOrbMode({ ...base2, muted: true, pendingApprovals: 3 })).toBe('idle')
+  })
+
+  // 2026-09-24 空格对话 vs 实时对话的一致性修复：实时通道模型说话时也必须是蓝球
+  test('实时通道模型在说 → speaking（与 TTS 播报同义）', () => {
+    expect(deriveOrbMode({ ...base2, rtSpeaking: true })).toBe('speaking')
+    expect(deriveOrbMode({ ...base2, rtSpeaking: true, voiceSessionActive: true })).toBe('speaking')
+  })
+
+  // 注意带同理（实时不走 TTS 队列，此前只显示"在听"）
+  test('实时通道模型在说 → 注意带显示正在回复', () => {
+    const focusBase = { pendingApprovals: 0, toolRunning: 0, ...base2 }
+    expect(deriveAgentFocus({ ...focusBase, rtSpeaking: true })).toBe('speaking')
+    expect(deriveAgentFocus({ ...focusBase, ttsPlaying: true })).toBe('speaking')
+    expect(deriveAgentFocus({ ...focusBase })).toBe('idle')
+  })
+})
+
 describe('deriveOrbMode (2026-08-24 球态语义统一)', () => {
   const base = {
     muted: false,

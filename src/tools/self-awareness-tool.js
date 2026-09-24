@@ -12,6 +12,12 @@
 const { registry } = require('./registry');
 const { getSelfAwareness, formatForPrompt: _formatForPrompt } = require('../core/self-awareness');
 
+// 依赖反转接线(层契约 R1: core 禁止 require 上层 src/tools)——注册表由本文件(tools 层)
+// 注入单例, self-awareness 的工具感知由此获得真实计数。
+// 此前 core 侧用错误路径 require('../../tools/registry')+空 catch 吞异常, tools.total 恒 0,
+// 每轮向模型注入"0 tools"(2026-09-24 修复)。
+getSelfAwareness().setToolRegistry(registry);
+
 function _unwrap(res) {
   if (!res) return res;
   if (res.data && typeof res.data === 'object') return res.data;

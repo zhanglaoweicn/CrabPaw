@@ -48,7 +48,19 @@ export function HeartbeatCard({ online, heartBeatActive, heartBeatCount, service
   return (
     <div style={{ padding: '14px 16px 12px', display: 'flex', flexDirection: 'column', gap: 8, width: '100%', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 14, borderRadius: '50%' }}>{st.dot}</span>
+        {/* 2026-09-24 会客厅轮: 状态点去 emoji（🔴/🟡/🟢 会把"专业仪器"拉成手机 App）。
+            deriveHomeStatus().dot 字段保留（对外契约与单测不动），这里只按 tone 画同色圆点。 */}
+        <span
+          aria-hidden
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: '50%',
+            flexShrink: 0,
+            background: st.tone === 'busy' ? '#fbbf24' : st.tone === 'offline' ? '#f87171' : '#4ade80',
+            boxShadow: `0 0 10px ${st.tone === 'busy' ? 'rgba(251,191,36,0.55)' : st.tone === 'offline' ? 'rgba(248,113,113,0.5)' : 'rgba(74,222,128,0.5)'}`,
+          }}
+        />
         <span
           style={{
             fontSize: 20,
@@ -63,6 +75,37 @@ export function HeartbeatCard({ online, heartBeatActive, heartBeatCount, service
       </div>
 
       <HeartBeatEcg active={heartBeatActive} hasData={hasData} online={online} speaking={speaking} height={64} />
+
+      {/* 2026-09-24 会客厅轮: 离线时补一个恢复入口——此前只显示红点/离线，没有任何
+          可点的动作（用户只能重开应用）。service:start 本身幂等（运行中会直接返回）。 */}
+      {!online && (
+        <button
+          type="button"
+          onClick={() => {
+            void (async () => {
+              try {
+                await window.electronAPI?.service?.start?.({ channel: 'none' })
+              } catch (e) {
+                console.warn('[heartbeat] 重新连接失败:', e)
+              }
+            })()
+          }}
+          style={{
+            alignSelf: 'flex-start',
+            fontSize: 12,
+            fontWeight: 600,
+            padding: '4px 12px',
+            borderRadius: 'var(--radius-full)',
+            cursor: 'pointer',
+            background: 'transparent',
+            border: '1px solid rgba(248, 113, 113, 0.55)',
+            color: '#f87171',
+          }}
+          title="尝试重新启动后端服务"
+        >
+          重新连接
+        </button>
+      )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {rows.map(r => (

@@ -9,7 +9,7 @@
  * - 交互豁免：按钮/输入/滚动区 [data-no-drag] 按下不拖动（useDraggable 默认规则）
  */
 import { useEffect, useRef, useState } from 'react'
-import { useDraggable } from '../../lib/useDraggable'
+import { useDraggable, clampCardOffset } from '../../lib/useDraggable'
 import './styles.css'
 
 export interface ShellFloatCardProps {
@@ -21,8 +21,9 @@ export interface ShellFloatCardProps {
   zIndex?: number | string
   className?: string
   style?: React.CSSProperties
-  /** 顶部标题栏（兼拖拽柄区域；不传则不显示顶栏） */
-  title?: string
+  /** 顶部标题栏（兼拖拽柄区域；不传则不显示顶栏）。
+   *  2026-09-24 会客厅轮: 放宽为 ReactNode——标题里要放 lucide 图标，替掉 emoji */
+  title?: React.ReactNode
   /** 2026-09-05: 可选 DOM 标识——外部组件(如 CollabOrbit)需量取本卡实时位置时使用 */
   domId?: string
   /** 持久化为空时的默认偏移（相对 fixed 锚点 0,0） */
@@ -31,6 +32,9 @@ export interface ShellFloatCardProps {
   blur?: 'none' | 'sm' | 'md'
   /** 2026-08-31: 卡内交互元素(按钮等)也允许拖动——按下移动=拖, 原地点击=按钮语义 */
   dragOnButtons?: boolean
+  /** 2026-09-24 会客厅轮: 是否允许拖动（缺省 true）。一体机上卡片不该被拖走/拖乱，
+   *  且球卡的"按住说话"手势要与拖动共存——关掉拖动后手势不再有歧义 */
+  draggable?: boolean
   /** 2026-08-31: 裸卡态——去边线/底色/投影(如语音球透明化试验) */
   bare?: boolean
   /** "恢复默认布局"非ce——变更时清持久化回默认 */
@@ -49,6 +53,7 @@ export function ShellFloatCard({
   defaultOffset = { x: 24, y: 24 },
   blur = 'none',
   dragOnButtons = false,
+  draggable = true,
   bare = false,
   resetNonce = 0,
 }: ShellFloatCardProps) {
@@ -71,7 +76,7 @@ export function ShellFloatCard({
   const dirtyRef = useRef(false)
 
   const { dragging, handlers } = useDraggable({
-    enabled: true,
+    enabled: draggable,
     offset,
     onOffsetChange: (o) => { dirtyRef.current = true; setOffset(o) },
     panelRef,
@@ -93,6 +98,29 @@ export function ShellFloatCard({
     setOffset({ ...defaultOffset })
   }, [resetNonce, storageKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 2026-09-23 排版修复: 窗口缩放后把「已拖动过」的卡片拉回可见区。
+  // 位置是持久化的，而钳制此前只发生在拖动过程中——缩小窗口后卡片会永久留在屏外，
+  // 用户没有滚动条能找回来（"恢复默认布局"是唯一出口，而它混在五个图标里）。
+  // 只作用于用户拖动产生的 offset；未拖动时默认锚点每帧重算，无需干预。
+  useEffect(() => {
+    const onResize = () => {
+      setOffset(prev => {
+        if (!prev) return prev
+        const el = panelRef.current
+        const next = clampCardOffset(
+          prev,
+          { w: el?.offsetWidth ?? 0, h: el?.offsetHeight ?? 0 },
+          { w: window.innerWidth, h: window.innerHeight },
+        )
+        if (next.x === prev.x && next.y === prev.y) return prev
+        dirtyRef.current = true
+        return next
+      })
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
   const effectiveOffset = offset ?? defaultOffset
   const cssWidth = typeof width === 'number' ? `${width}px` : width
 
@@ -107,7 +135,7 @@ export function ShellFloatCard({
         zIndex,
         ...style,
         transform: `translate(${effectiveOffset.x}px, ${effectiveOffset.y}px)`,
-        cursor: dragging ? 'grabbing' : 'grab',
+        cursor: dragging ? 'grabbing' : (draggable ? 'grab' : 'default'),
       }}
       {...handlers}
     >

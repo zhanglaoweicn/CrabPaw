@@ -173,6 +173,22 @@
               box-shadow 0.25s ease !important;
 }
 
+/* ─── 2026-09-22 可访问性: 仅供读屏的文本容器 ───
+   语音球是 canvas，视觉状态对读屏完全不可知；状态变化经此元素播报。
+   用 clip-path 而非 display:none（后者会让读屏也读不到）。 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ═══════════════════════════════════════════════════════════
    Multi‑Color Accent Themes (activated by data-accent on <html>)
    ═══════════════════════════════════════════════════════════ */

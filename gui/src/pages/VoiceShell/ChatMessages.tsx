@@ -276,11 +276,16 @@ export function ChatEmptyState({
   pttOnly,
   continuousMode,
   onAsk,
+  liveSuggestions,
 }: {
   pttOnly: boolean
   continuousMode: boolean
   onAsk: (text: string) => void
+  /** 2026-09-24 会客厅轮: 有真实数据时用"这个用户自己的事"当快捷问（逾期/日程/合同），
+   *  通用 chip 降为次要一行——空态该回答"我现在能问什么"，而不是给一道六选一 */
+  liveSuggestions?: string[]
 }) {
+  const hasLive = (liveSuggestions?.length ?? 0) > 0
   return (
     <div className="voice-shell-chat-empty">
       <div className="voice-shell-chat-empty-hint">
@@ -294,18 +299,30 @@ export function ChatEmptyState({
             : '说「小螃蟹」或直接输入文字开始对话'}
       </div>
       {!pttOnly && (
-        <div className="voice-shell-suggest">
-          {SUGGESTED_PROMPTS.map((s) => (
-            <button
-              key={s}
-              type="button"
-              className="voice-shell-suggest-chip"
-              onClick={() => onAsk(s)}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
+        <>
+          {hasLive && (
+            <div className="voice-shell-suggest">
+              {liveSuggestions!.map((s) => (
+                <button key={s} type="button" className="voice-shell-suggest-chip" onClick={() => onAsk(s)}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className={`voice-shell-suggest${hasLive ? ' voice-shell-suggest--secondary' : ''}`}>
+            {hasLive && <span className="voice-shell-suggest-label">或者试试</span>}
+            {SUGGESTED_PROMPTS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                className="voice-shell-suggest-chip"
+                onClick={() => onAsk(s)}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </>
       )}
     </div>
   )

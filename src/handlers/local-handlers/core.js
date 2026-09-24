@@ -101,7 +101,7 @@ async function handleMetrics(req, res, _ctx) {
   }
 }
 
-async function handleShutdown(req, res, _ctx) {
+async function handleShutdown(req, res, ctx) {
   // 2026-08-07 (M12 安全): 此前仅凭 X-Electron: true 即可停机——任意本机进程
   // 或经本地转发的远端连接都能杀死服务。现要求：本机回环来源 + 合法 API token
   // （Electron 主进程停机调用同时携带 X-Api-Key(.api_token) 与 X-Electron，不受影响；
@@ -126,6 +126,15 @@ async function handleShutdown(req, res, _ctx) {
     destroyVoiceCloudWS();
   } catch (e) {
     console.warn('[shutdown] Voice drain 失败:', e.message);
+  }
+  // 2026-09-23: 这条路径直接 process.exit(0)，不经过 server.js 的 shutdown()，
+  // 所以退出前清理必须在这里显式调用一次。清理项（解除 Process Watchdog、终止飞书/企微
+  // 事件桥接器）统一收在 server.js 的 serverCtx.runBeforeExit 里——此前两处各写一份，
+  // 端点这条路径漏掉过（桥接器变孤儿，发行清单 §6「无残留 node 进程」会 FAIL）。
+  try {
+    if (ctx && typeof ctx.runBeforeExit === 'function') ctx.runBeforeExit();
+  } catch (e) {
+    console.warn('[shutdown] 退出前清理失败:', e.message);
   }
   setTimeout(() => {
     process.exit(0);

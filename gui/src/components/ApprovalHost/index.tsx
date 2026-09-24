@@ -10,11 +10,25 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { useSse } from '../../hooks/useSSE'
 import { ApprovalCard, type ApprovalRequest, type ApprovalResolved } from '../ApprovalCard'
 import { apiGet, apiPost } from '../../lib/api'
 import { registerCommandHost } from '../../lib/ui-command-registry'
+import { announce, markNoticeHandled, recordNotice } from '../../lib/notices'
 import './styles.css'
+
+/** 把命令原文压成一句人话线索——账本次行与播报都用它，避免念一整串 shell */
+function describeCommand(command?: string): string {
+  const c = String(command || '').replace(/\s+/g, ' ').trim()
+  if (!c) return ''
+  return c.length > 40 ? `${c.slice(0, 40)}…` : c
+}
+
+/** 播报开关——与提示音共用 approval-sound 设置（新增设置项只会多一处未配置项） */
+function approvalVoiceEnabled(): boolean {
+  try { return localStorage.getItem('approval-sound') !== 'off' } catch { return true }
+}
 
 /**
  * 2026-08-19 三栏联动轮 P2: 审批输入区接管——
@@ -45,6 +59,9 @@ export function ApprovalHost({ variant = 'overlay', onActiveChange }: {
   }, [])
   const pendingRef = useRef<ApprovalRequest[]>([])
   pendingRef.current = pendingApprovals
+  // 2026-09-22 体验层: 已上报过的超时请求 id——过期检测每 2s 跑一次, 保证每次超时
+  // 只记一笔账、只播一句, 不随轮询重复刷屏
+  const reportedExpiredRef = useRef<Set<string>>(new Set())
 
   // C5(Runtime差距分析): 挂载时恢复未决审批——此前仅靠 SSE approval_requested
   // 实时事件,渲染进程刷新期间产生的审批卡永久丢失(后端仍在 waitForApproval 挂起,
@@ -79,15 +96,55 @@ export function ApprovalHost({ variant = 'overlay', onActiveChange }: {
     return () => { cancelled = true }
   }, [])
 
-  // 过期自动清理(倒计时到 0 的卡移除)
+  // 过期处理（2026-09-22 体验层重构：不再是静默移除）
+  //
+  // 后端在超时那一刻就按「自动拒绝」落定了（src/core/security/approval.js 的
+  // resolutionReason = 'approval_timeout_auto_deny'）。此前前端只是把卡片
+  // filter 掉——老板离开座位一分钟回来，一个需要他拍板的操作悄悄没了，
+  // 既没有提示、也没有痕迹，甚至不知道发生过。现在补三件事：
+  //   ① 账本记一笔（左栏事务账本，可回看）
+  //   ② toast 可见提示（不依赖他正好在看卡区）
+  //   ③ 说一句（语音优先产品里，最该开口的场景此前只有一声提示音）
+  // 多条同时超时合并成一句播报，避免念成一串。
   useEffect(() => {
     if (pendingApprovals.length === 0) return
     const timer = setInterval(() => {
       const now = Date.now()
-      setPendingApprovals(prev => {
-        const alive = prev.filter(r => r.expiresAt > now)
-        return alive.length === prev.length ? prev : alive
-      })
+      const expired = pendingRef.current.filter(
+        r => r.expiresAt <= now && !reportedExpiredRef.current.has(r.id),
+      )
+      if (expired.length === 0) return
+      for (const r of expired) reportedExpiredRef.current.add(r.id)
+
+      for (const r of expired) {
+        recordNotice({
+          id: `approval_timeout_${r.id}`,
+          ts: r.expiresAt,
+          kind: 'approval',
+          level: 'failed',
+          title: '一个待确认的操作超时了，已按拒绝处理',
+          detail: describeCommand(r.command),
+          ref: r.id,
+        })
+      }
+
+      const first = expired[0]
+      const brief = describeCommand(first.command)
+      const spoken = expired.length === 1
+        ? `刚才那个确认请求超时了，我按拒绝处理了${brief ? `。它要做的是：${brief}` : ''}`
+        : `有 ${expired.length} 个确认请求超时，都按拒绝处理了`
+      try {
+        if (approvalVoiceEnabled()) announce(spoken, { id: `approval_timeout_${first.id}`, kind: 'approval' })
+      } catch (e) { console.warn('[ApprovalHost] 超时播报失败:', e) }
+
+      try {
+        toast.warning(
+          expired.length === 1 ? '一个待确认的操作超时了' : `${expired.length} 个待确认操作超时了`,
+          { description: '已经按拒绝处理。需要的话让我重来一次就好。', duration: 8000 },
+        )
+      } catch (e) { console.warn('[ApprovalHost] 超时提示失败:', e) }
+
+      setPendingApprovals(prev => prev.filter(r => r.expiresAt > now))
     }, 2000)
     return () => clearInterval(timer)
   }, [pendingApprovals.length])
@@ -116,6 +173,28 @@ export function ApprovalHost({ variant = 'overlay', onActiveChange }: {
       approval_requested: (data: any) => {
         if (!data?.requestId) return
         if (localStorage.getItem('approval-sound') !== 'off') playChime()
+        // 2026-09-22 体验层: 需要老板出手的事是全项目最该「开口」的事件——
+        // 此前只有一声 880Hz 提示音。而语音批准/拒绝的指令早就通了
+        // (voice-panel-commands 的 approval 规则), 等于工具齐了、没人通知。
+        // 播报走 notices.announce → crabpaw:speak → 共享播报队列: 主回复进行中
+        // 不抢播、静音时自然丢弃, 不会打断正在说的回复。
+        try {
+          const brief = describeCommand(data.command)
+          recordNotice({
+            id: `approval_${data.requestId}`,
+            kind: 'approval',
+            level: 'action',
+            title: '有个操作需要你确认',
+            detail: brief,
+            ref: data.requestId,
+          })
+          if (approvalVoiceEnabled()) {
+            announce(
+              `有个操作需要你确认${brief ? `：${brief}` : ''}。说“批准”或“拒绝”就行`,
+              { id: `approval_${data.requestId}`, kind: 'approval' },
+            )
+          }
+        } catch (e) { console.warn('[ApprovalHost] 审批到达记账/播报失败:', e) }
         setPendingApprovals(prev => {
           if (prev.some(r => r.id === data.requestId)) return prev
           return [...prev, {
@@ -133,6 +212,8 @@ export function ApprovalHost({ variant = 'overlay', onActiveChange }: {
       approval_resolved: (data: any) => {
         if (!data?.requestId) return
         setPendingApprovals(prev => prev.filter(r => r.id !== data.requestId))
+        // 账本同源收口：已拍板的事不再挂在「需要你出手」档
+        markNoticeHandled(`approval_${data.requestId}`)
         // 同步清除 inFlight 标记，防止集合只增不减导致后续审批卡永久禁用
         setInFlightIds(prev => {
           if (!prev.has(data.requestId)) return prev
@@ -146,6 +227,7 @@ export function ApprovalHost({ variant = 'overlay', onActiveChange }: {
 
   const handleResolved = (_r: ApprovalResolved) => {
     setPendingApprovals(prev => prev.filter(r => r.id !== _r.id))
+    markNoticeHandled(`approval_${_r.id}`)
     // 同上：resolved 后必须移出 inFlightIds
     setInFlightIds(prev => {
       if (!prev.has(_r.id)) return prev
@@ -190,6 +272,7 @@ export function ApprovalHost({ variant = 'overlay', onActiveChange }: {
     }).then(result => {
       if (result.success) {
         setPendingApprovals(prev => prev.filter(r => r.id !== requestId))
+        markNoticeHandled(`approval_${requestId}`)
       }
       setInFlightIds(prev => {
         if (!prev.has(requestId)) return prev

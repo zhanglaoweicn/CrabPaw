@@ -140,6 +140,19 @@ export function useVoiceChatFlow(
   // 2026-08-04: 支持附件——文本对话配套文件上传(后端 /chat files 字段,注入消息提示 LLM 读取)
   // 2026-09-17: 支持实时语音上下文接力——委托任务时携带实时会话最近几轮用户话轮
   const sendText = useCallback(async (text: string, files?: Array<{ path: string; name: string; type?: string; size?: number }>, voiceContext?: Array<{ text: string }>) => {
+    // 2026-09-22 体验层: 打字插话立即闭嘴。
+    // 此前 sendText 全程不调 interruptTTS——旧播报要等新回复吐出第一个 chunk
+    // 才被 beginStreamingTTS 内部打断，中间 1~3 秒两个声音同时在说。语音侧
+    // 打断早就完备（PTT/唤醒/能量三通道），唯独文字侧漏了这一处。
+    // 位置必须在递增 generation 之前：老一轮的 onInterrupted 闭包凭 gen 相等
+    // 才会执行，从而干净复位 isSpeaking/字幕/__ttsStreamStarted（若放在 gen
+    // 自增之后，老闭包会提前 return，球体将卡在"播报中"直到新流首个语音段）。
+    // interruptTTS 体内无 await，实质同步完成，不会推迟发送。
+    try {
+      Promise.resolve(interruptTTS()).catch((e: unknown) => { console.warn('[flow] 发送前打断播报失败:', e) })
+    } catch (e) {
+      console.warn('[flow] 发送前打断播报失败:', e)
+    }
     setAiText('')
     setPending(true)
     setReplyCompleted(false)

@@ -127,9 +127,11 @@ export default defineConfig({
           'vendor-react': ['react', 'react-dom'],
           'vendor-markdown': ['react-markdown'],
           'vendor-ui': ['lucide-react', 'sonner'],
-          'vendor-mermaid': ['mermaid'],
-          'vendor-katex': ['katex'],
           'vendor-three': ['three'],
+          // 2026-09-23: 移除 'vendor-mermaid' / 'vendor-katex' —— 两者在源码里零
+          // import（package.json 声明了、全项目无引用），分组无模块可放时 Vite 会把
+          // 该名字派给一个公共共享 chunk，于是产出一个名叫 vendor-mermaid、却一个
+          // mermaid 都不含的 64KB chunk，误导体积排查。
         }
       }
     }

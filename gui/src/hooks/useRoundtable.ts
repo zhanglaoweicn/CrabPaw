@@ -69,6 +69,32 @@ export function rtDeptColor(dept?: string): string {
   return (dept && DEPT_COLORS[dept]) || '#607d8b'
 }
 
+/** 后端实际广播的阶段序列（src/core/experts/roundtable.js 的 _setPhase 调用点） */
+export const RT_PHASES = ['round1', 'round2', 'synthesis', 'document', 'done'] as const
+
+/**
+ * 阶段 → 人话（2026-09-22 体验层）。
+ *
+ * 背景：后端从第一天就在广播 `roundtable:phase`（round1/round2/synthesis/
+ * document/done），但前端 useRoundtable 从未订阅——老板看到的只有"进行中"
+ * 一条横幅，不知道进行到哪、还剩几轮。这里把已有事件翻成人话。
+ */
+export function rtPhaseLabel(phase?: string, round?: number): string {
+  switch (phase) {
+    case 'round1': return '第 1 轮 · 各自陈述'
+    case 'round2': return '第 2 轮 · 交叉质询'
+    case 'synthesis': return '主持人收口'
+    case 'document': return '生成会议纪要'
+    case 'done': return '已结束'
+    default: return round ? `第 ${round} 轮` : ''
+  }
+}
+
+/** 阶段在序列中的位置（0-based）；未知阶段返回 -1——不编造进度 */
+export function rtPhaseIndex(phase?: string): number {
+  return RT_PHASES.indexOf(phase as (typeof RT_PHASES)[number])
+}
+
 interface RtSpeechJob {
   key: string
   text: string
@@ -102,6 +128,18 @@ export function useRoundtableMeetings(options: RoundtableCallbacks = {}) {
   const [goal, setGoal] = useState('')
   const [typing, setTyping] = useState<{ name: string; dept?: string } | null>(null)
   const [muted, setMuted] = useState(options.initialMuted ?? false)
+  // 2026-09-22 体验层: 会议阶段与到场情况。
+  // 后端一直在广播 roundtable:phase（round1/round2/synthesis/document/done），
+  // 此前前端无人订阅——老板只看到"进行中"，不知道进行到哪、几位专家已发过言。
+  const [phase, setPhase] = useState<string>('')
+  const [roster, setRoster] = useState<RtParticipant[]>([])
+  const [spokenCount, setSpokenCount] = useState(0)
+  const spokenRef = useRef<Set<string>>(new Set())
+  // 2026-09-23 中止能力: 当前会议 id（取消要带 id）+ 中止请求已发出（按钮转"中止中…"，
+  // 直到 roundtable:ended 到达才复位）
+  const [meetingId, setMeetingId] = useState<string>('')
+  const [cancelling, setCancelling] = useState(false)
+  const meetingIdRef = useRef<string>('')
   const mutedRef = useRef(options.initialMuted ?? false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const queueRef = useRef<RtSpeechJob[]>([])
@@ -177,6 +215,31 @@ export function useRoundtableMeetings(options: RoundtableCallbacks = {}) {
     }
   }, [])
 
+  /**
+   * 中止本场圆桌会（2026-09-23）。
+   *
+   * 语义：不删已产生的发言，只让后面的专家不再开口——正在发言的那位会把话说完
+   * （单条 LLM 调用不可中断）。所以按钮文案是"中止"而非"立即停止"，且发出请求后
+   * 转"中止中…"直到 roundtable:ended 到达，不假装已经停了。
+   */
+  const cancel = useCallback(async (): Promise<boolean> => {
+    const id = meetingIdRef.current
+    if (!id) return false
+    setCancelling(true)
+    try {
+      const res = await apiPost<{ ok?: boolean }>(`/api/experts/roundtable/${id}/cancel`, {})
+      if (!(res && res.success)) {
+        setCancelling(false)   // 未被受理（已结束/不存在）→ 恢复按钮，允许再试
+        return false
+      }
+      return true
+    } catch (e) {
+      console.warn('[Roundtable] 中止请求失败:', e)
+      setCancelling(false)
+      return false
+    }
+  }, [])
+
   useSse({
     path: '/events',
     handlers: useMemo(() => ({
@@ -187,6 +250,20 @@ export function useRoundtableMeetings(options: RoundtableCallbacks = {}) {
         setRunning(true)
         setGoal(d.goal || '')
         setTyping(null)
+        // 2026-09-22: 到场名单与计数重置（新一场会从头算）
+        setRoster(membersRef.current)
+        spokenRef.current = new Set()
+        setSpokenCount(0)
+        setPhase('')
+        // 2026-09-23: 记录会议 id（中止要用）并复位中止态
+        meetingIdRef.current = d.meetingId
+        setMeetingId(d.meetingId)
+        setCancelling(false)
+      },
+      // 2026-09-22 体验层: 阶段推进（round1 → round2 → synthesis → document → done）
+      'roundtable:phase': (d: any) => {
+        if (!d?.meetingId) return
+        setPhase(d.phase || '')
       },
       'roundtable:typing': (d: any) => {
         if (!d?.meetingId) return
@@ -197,6 +274,11 @@ export function useRoundtableMeetings(options: RoundtableCallbacks = {}) {
         if (!d?.meetingId || !d.statement) return
         setTyping(null)
         const st = d.statement as RtStatement
+        // 2026-09-22: 已发言专家去重计数（同一专家两轮发言只算一位到场）
+        if (st.expertId) {
+          spokenRef.current.add(st.expertId)
+          setSpokenCount(spokenRef.current.size)
+        }
         // 第3轮=主持收口：对话流由 roundtable:conclusion 统一落"✅ 会议收口"消息，
         // 这里不再以普通发言气泡重复（2026-09-20 检查纪要文档发现的重复问题同源）；语音照播
         if ((st.round ?? 0) < 3) cbRef.current.onStatement?.(st)
@@ -218,16 +300,25 @@ export function useRoundtableMeetings(options: RoundtableCallbacks = {}) {
         if (!d?.meetingId) return
         setRunning(false)
         setTyping(null)
+        setPhase('done')
+        setCancelling(false)
         cbRef.current.onEnded?.(d.status || 'done', d.error ?? null)
       },
       'roundtable:error': (d: any) => {
         if (!d?.meetingId) return
         setRunning(false)
         setTyping(null)
+        setPhase('done')
+        setCancelling(false)
         cbRef.current.onEnded?.('error', d.message ?? null)
       },
     }), [enqueueSpeech]),
   })
 
-  return { running, goal, typing, muted, toggleMuted, intervene }
+  return {
+    running, goal, typing, muted, toggleMuted, intervene,
+    phase, roster, spokenCount,
+    // 2026-09-23 中止能力
+    meetingId, cancel, cancelling,
+  }
 }

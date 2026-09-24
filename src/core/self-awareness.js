@@ -34,6 +34,17 @@ class SelfAwareness extends EventEmitter {
  this._cache = null;
  this._cacheTime = 0;
  this._cacheTtlMs = 60 * 1000; // 60s
+ // 2026-09-24 依赖反转: 工具注册表由 tools 层注入(setToolRegistry), core 不直接 require src/tools
+ this._toolRegistry = null;
+ }
+
+ /**
+  * 注入工具注册表（src/tools/self-awareness-tool.js 启动时调用）。
+  * 未注入时工具感知诚实降级为 0 并告警（启动早期属正常）。
+  * @param {object} registry 需实现 getStats()/getAll()
+  */
+ setToolRegistry(reg) {
+ this._toolRegistry = reg;
  }
 
  invalidate() {
@@ -162,13 +173,19 @@ class SelfAwareness extends EventEmitter {
 
  // 工具
  try {
- const { registry } = require('../../tools/registry');
- const stats = registry.getStats?.() || {};
+ // 2026-09-24 依赖反转(层契约 R1: core 禁止 require 上层 src/tools): 工具注册表由
+ // tools 层注入(self-awareness-tool.js 启动时 setToolRegistry)。此前用 require('../../tools/registry')
+ // 路径错一级+空 catch 吞异常, tools.total 恒 0 每轮注入"0 tools"误导模型。
+ if (this._toolRegistry) {
+ const stats = this._toolRegistry.getStats?.() || {};
  perception.tools.total = stats.totalTools || 0;
- const tools = registry.getAll?.() || [];
+ const tools = this._toolRegistry.getAll?.() || [];
  for (const t of tools) {
  const ts = t.toolset || 'default';
  perception.tools.byToolset[ts] = (perception.tools.byToolset[ts] || 0) + 1;
+ }
+ } else {
+ console.warn('[self-awareness] 工具注册表未注入(启动早期属正常), 工具感知为 0');
  }
  } catch (e) {
    /* ignore */

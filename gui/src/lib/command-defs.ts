@@ -111,4 +111,19 @@ export const COMMAND_DEFS: CommandDef[] = [
     id: 'cockpit-expert', label: '专家', hint: '管理舱 → 专家',
     run: () => { executeCommand('cockpit', 'open', 'expert') },
   },
+  // 2026-09-22 体验层: 演示模式——例会/圆桌/投屏时把界面收成"只留议题与结论"。
+  // 不绑单键快捷键：全局单键已被 h/t/s/w/m 占用，且演示中误触代价高。
+  {
+    id: 'present-toggle', label: '演示模式', hint: '投屏/例会时只留议题与结论',
+    voiceAliases: [...voice('present', 'open'), ...voice('present', 'close')],
+    run: () => { executeCommand('voiceShell', 'togglePresent') },
+  },
+  // 2026-09-24 会客厅轮(S3): 会客厅模式——放大球、收起遥测卡、客人面前隐藏经营明细。
+  // 比"演示模式"更彻底：演示模式是临时只留结论，本项是"这台机器的形态"。
+  // 同样不绑单键快捷键（全局单键已被 h/t/s/w/m 占满，且误触会改形态）。
+  {
+    id: 'kiosk-toggle', label: '会客厅模式', hint: '墙上的形态：大球、收起遥测、隐藏经营明细',
+    voiceAliases: [...voice('kiosk', 'open'), ...voice('kiosk', 'close')],
+    run: () => { executeCommand('voiceShell', 'toggleKiosk') },
+  },
 ]

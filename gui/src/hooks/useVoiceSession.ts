@@ -218,8 +218,29 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
   const rtUnmuteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // 2026-09-17: 实时通道状态——模型播报中/能量抢话连击计数/口播排队
   const rtSpeakingRef = useRef(false)
+  /**
+   * 2026-09-24: 实时通道「模型正在说话」对外广播。
+   * 实时对话的声音来自双工 WS（模型自带嗓音），不走 TTS 队列 → ttsPlaying/isSpeaking/
+   * queuePlaying 全为假 → 球会停在绿色（在听）而它其实在说。这里用一个出口把状态同时
+   * 给两处消费方：window.__rtSpeaking（供 VoiceIntegration 的合成音量驱动）与
+   * crabpaw:rt-speaking 事件（供 React 侧改球态）。所有翻转点统一走本函数。
+   */
+  const setRtSpeaking = useCallback((v: boolean) => {
+    if (rtSpeakingRef.current === v) return
+    rtSpeakingRef.current = v
+    try {
+      ;(window as any).__rtSpeaking = v
+      window.dispatchEvent(new CustomEvent('crabpaw:rt-speaking', { detail: { speaking: v } }))
+    } catch (e) {
+      console.warn('[RT] 播报状态广播失败:', (e as Error)?.message || e)
+    }
+  }, [])
   const rtBargeInLoudRef = useRef(0)
-  const rtPendingSpeakRef = useRef<string | null>(null)
+  // 2026-09-19: 分块朗读队列——长回复(资讯列表等)按句切 ≤70 字/块(约 15s 语音,
+  // 低于 20s 播报态自愈阈值), 上一块 audio_end 后 700ms 续播下一块;
+  // 用户抢话/打断即清空队列(seq 递增使在途定时器失效), 剩余内容屏幕上仍可读。
+  const rtSpeakQueueRef = useRef<string[]>([])
+  const rtSpeakSeqRef = useRef(0)
   // 断线续播: 记录最近一次口播文本与完成态——WS 意外断线重连后未播完的摘要重读
   const rtEverReadyRef = useRef(false)
   const rtLastSpeakRef = useRef<{ text: string; done: boolean }>({ text: '', done: true })
@@ -408,6 +429,8 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
   // 主进程 wake:audio-level 广播承担)
   const levelDetectorRef = useRef<AudioLevelDetector | null>(null)
   const energyEmitTsRef = useRef(0)
+  /** 2026-09-23 球体动感增强: 快速能量通道节流（60ms ≈ 16Hz）——球的逐帧包络输入 */
+  const fastEmitTsRef = useRef(0)
   // 2026-08-08(A3): 连续模式静音保活帧时间戳——静音时降频发送保活
   const lastKeepaliveTsRef = useRef(0)
   const handlePcmChunk = useCallback((i16: Int16Array) => {
@@ -430,7 +453,9 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
         // 状态卡死) → 强制复位恢复聆听。实测 tx=0 永久失聪的根因即状态卡死。
         if (Date.now() - rtAudioStartTsRef.current > 20000) {
           console.warn('[RT] 播报态超时 20s, 强制复位自愈')
-          rtSpeakingRef.current = false
+          setRtSpeaking(false)
+          rtSpeakQueueRef.current = []
+          rtSpeakSeqRef.current++
           rtStopPlayback()
           rtWsSend({ type: 'interrupt' })
           rtWsSend({ type: 'unmute' })
@@ -440,7 +465,9 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
           rtBargeInLoudRef.current = 0
         } else if (++rtBargeInLoudRef.current >= 4) {
           rtBargeInLoudRef.current = 0
-          rtSpeakingRef.current = false
+          setRtSpeaking(false)
+          rtSpeakQueueRef.current = []   // 用户抢话: 未读的后续块全部让位
+          rtSpeakSeqRef.current++
           if (rtUnmuteTimerRef.current) { clearTimeout(rtUnmuteTimerRef.current); rtUnmuteTimerRef.current = null }
           rtStopPlayback()
           rtWsSend({ type: 'interrupt' })
@@ -552,8 +579,9 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
       }
       case 'audio_start':
         lastTranscriptTsRef.current = Date.now()
-        rtSpeakingRef.current = true
+        setRtSpeaking(true)
         rtAudioStartTsRef.current = Date.now()
+        console.log('[RT] 块播报开始:', String(rtLastSpeakRef.current.text || '').slice(0, 16))
         if (rtUnmuteTimerRef.current) { clearTimeout(rtUnmuteTimerRef.current); rtUnmuteTimerRef.current = null }
         break
       case 'audio':
@@ -562,14 +590,30 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
         break
       case 'audio_end':
         // 播报结束: 静音解除由 rtSetCallbacks 的 onEnd 延迟处理(等喇叭尾音);
-        // 排队中的口播(模型说话期间到达的摘要)在尾音静默后补播
-        rtSpeakingRef.current = false
+        // 2026-09-19: 队列续播——上一块播完 700ms 后喂下一块(seq 守卫防打断后复活)
+        setRtSpeaking(false)
         if (rtLastSpeakRef.current.text) rtLastSpeakRef.current.done = true
-        if (rtPendingSpeakRef.current) {
-          const pending = rtPendingSpeakRef.current
-          rtPendingSpeakRef.current = null
-          rtLastSpeakRef.current = { text: pending, done: false }
-          setTimeout(() => rtWsSend({ type: 'speak', text: pending }), 700)
+        {
+          const seq = rtSpeakSeqRef.current
+          const next = rtSpeakQueueRef.current.shift()
+          console.log('[RT] 块播报结束, 队列剩余:', rtSpeakQueueRef.current.length)
+          if (next !== undefined) {
+            rtLastSpeakRef.current = { text: next, done: false }
+            setTimeout(() => {
+              if (rtSpeakSeqRef.current !== seq) return
+              // 2026-09-22 修复: 续播前检查 WS——断线时 rtWsSend 会静默丢帧,
+              // 播报停在该块且无任何痕迹(用户实测"只播第一句")。非在线时把块
+              // 塞回队列头部, 重连 ready 的既有断线续播会先读 lastSpeak,
+              // 其 audio_end 再自然续播队列, 闭环恢复。
+              const ws = asrWsRef.current
+              if (!ws || ws.readyState !== WebSocket.OPEN) {
+                rtSpeakQueueRef.current.unshift(next)
+                console.warn('[RT] 续播时 WS 不在线, 块已留队待重连续播:', next.slice(0, 20))
+                return
+              }
+              rtWsSend({ type: 'speak', text: next })
+            }, 700)
+          }
         }
         break
       case 'reply_delta':
@@ -592,6 +636,9 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
         break
       }
       case 'cancelled':
+        console.warn('[RT] 服务端取消播报(用户说话/打断), 队列剩余', rtSpeakQueueRef.current.length, '块被清空')
+        rtSpeakQueueRef.current = []
+        rtSpeakSeqRef.current++
         rtStopPlayback()
         break
       case 'error':
@@ -604,34 +651,55 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
   }, [onFinal, onInterim, onReplyDelta, onError, getSendMessage])
 
   // ── 实时通道控制（2026-09-17, classic 通道下为 no-op）──
-  // 任务完成后口播摘要回喂: 后端 → speech_text_buffer.commit → 模型念出来。
-  // speech_text_buffer 面向短句设计——长文本会中途断声(实测), 按句截断+尾注,
-  // 与 classic 通道"完整内容已显示在屏幕上"的播报设计对齐。
+  // 任务完成后口播回喂: 后端 → speech_text_buffer.commit → 模型念出来。
+  // 2026-09-19: 长回复完整朗读——speech_text_buffer 单次喂长文本会中途断声(实测),
+  // 改为按「句切分+超长硬切」拆 ≤70 字/块排队续播(上一块 audio_end 后 700ms 喂下一块);
+  // 用户抢话/打断即清空队列, 剩余内容屏幕上仍可读。classic 通道仍 no-op。
   const rtSpeak = useCallback((raw: string) => {
     if (dialogChannelRef.current !== 'realtime') return
     const text = String(raw || '').trim()
     if (!text) return
-    let spoken = text
-    if (spoken.length > 110) {
-      const cut = spoken.slice(0, 110)
-      const idx = Math.max(
-        cut.lastIndexOf('。'), cut.lastIndexOf('！'), cut.lastIndexOf('？'),
-        cut.lastIndexOf('；'), cut.lastIndexOf('，'), cut.lastIndexOf('…'),
-      )
-      spoken = (idx > 40 ? cut.slice(0, idx + 1) : cut) + '……完整内容已显示在屏幕上'
+    // 轻量去 markdown: 粗体标记/行内代码/标题井号/链接只留文字(语音念符号无意义)
+    const clean = text
+      .replace(/\*\*/g, '')
+      .replace(/`+/g, '')
+      .replace(/^#{1,4}\s*/gm, '')
+      .replace(/\[(.*?)\]\((https?:\/\/[^)]*)\)/g, '$1')
+      .replace(/\n{2,}/g, '\n')
+      .trim()
+    if (!clean) return
+    const chunks: string[] = []
+    let buf = ''
+    for (const piece of clean.split(/(?<=[。！？；…])\s*/)) {
+      if (!piece) continue
+      let p = piece
+      while (p.length > 70) {
+        if (buf) { chunks.push(buf); buf = '' }
+        chunks.push(p.slice(0, 70))
+        p = p.slice(70)
+      }
+      if (buf && buf.length + p.length > 70) { chunks.push(buf); buf = '' }
+      buf += p
     }
-    // 模型播报中到达的口播自动排队(播完由 audio_end 分支补播), 不互相顶掉
+    if (buf.trim()) chunks.push(buf.trim())
+    if (!chunks.length) return
     if (rtSpeakingRef.current) {
-      rtPendingSpeakRef.current = spoken
+      // 播报中: 新回复整体排队, 不打断当前块(audio_end 分支按队列续播)
+      rtSpeakQueueRef.current = rtSpeakQueueRef.current.concat(chunks)
       return
     }
-    rtLastSpeakRef.current = { text: spoken, done: false }
-    rtWsSend({ type: 'speak', text: spoken })
+    rtSpeakSeqRef.current++
+    rtSpeakQueueRef.current = chunks.slice(1)
+    rtLastSpeakRef.current = { text: chunks[0], done: false }
+    console.log('[RT] 长文分块朗读:', chunks.length, '块, 首块', chunks[0].length, '字')
+    rtWsSend({ type: 'speak', text: chunks[0] })
   }, [rtWsSend])
 
-  // 打断实时模型当前播报(PTT/唤醒/卡片打断入口复用)
+  // 打断实时模型当前播报(PTT/唤醒/卡片打断入口复用)——同时清空分块朗读队列
   const rtInterrupt = useCallback(() => {
     if (dialogChannelRef.current !== 'realtime') return
+    rtSpeakQueueRef.current = []
+    rtSpeakSeqRef.current++
     rtStopPlayback()
     rtWsSend({ type: 'interrupt' })
   }, [rtWsSend])
@@ -1019,6 +1087,17 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
 	        // watchdog 用它判断"用户是否还在说话"，避免安静时误触发重连
 	        const WATCHDOG_SPEECH_VOL = 0.05
 	        if (vol > WATCHDOG_SPEECH_VOL) lastLoudTsRef.current = Date.now()
+
+        // 2026-09-23 球体动感增强: 快速能量通道（60ms ≈ 16Hz）
+        // 上面的 1s 节流是给「活跃判定/状态」用的, 带宽太低——而球体动画要的是真实
+        // 峰值: 旧实现里球每秒只收到几个台阶、每次只补 15% 差距, 峰值永远到不了,
+        // 看起来几乎不动。本事件只被 VoiceOrb 订阅(直写 ref, 不触发 React 重渲染),
+        // 是纯视觉通道, 不参与任何状态判定。
+        const fastNow = Date.now()
+        if (fastNow - fastEmitTsRef.current >= 60) {
+          fastEmitTsRef.current = fastNow
+          window.dispatchEvent(new CustomEvent('crabpaw:voice-energy-fast', { detail: vol }))
+        }
 
 	        handlePcmChunk(frame)
       }

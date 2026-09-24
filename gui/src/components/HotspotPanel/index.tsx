@@ -16,12 +16,18 @@
  * - 错误重试机制
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
 import { apiGet, apiPost, isElectron } from '../../lib/api'
 import { useSceneClient } from '../../lib/scene-client'
-import { HotspotEarth } from '../HotspotEarth'
 import { registerCommandHost } from '../../lib/ui-command-registry'
 import { SideSheet } from '../SideSheet'
+
+// 2026-09-22 启动性能: three.js(约 512KB)此前随首屏静态进包——全项目只有
+// HotspotEarth 用它，而地球只是本面板里的一个装饰区块。改按需加载后 three
+// 移出首屏（落到异步 chunk，index.html 不再 modulepreload 它）。
+const HotspotEarth = lazy(() =>
+  import('../HotspotEarth').then(m => ({ default: m.HotspotEarth })),
+)
 
 /* ─── CSS keyframes 移至组件外部；启动序列动画已归 SideSheet（sheet-glitch-in）─── */
 const HS_STYLES = `
@@ -575,7 +581,11 @@ export function HotspotPanel() {
                 position: 'absolute', top: 12, left: 12,
                 fontSize: 12, fontWeight: 600, color: '#59a8ff', zIndex: 1,
               }}>全球热力图</div>
-              {visible && <HotspotEarth visible={visible} items={earthItems} />}
+              {visible && (
+                <Suspense fallback={null}>
+                  <HotspotEarth visible={visible} items={earthItems} />
+                </Suspense>
+              )}
               <div style={{
                 position: 'absolute', bottom: 12, left: 12,
                 fontSize: 10, color: '#888', zIndex: 1,

@@ -257,6 +257,41 @@ export function useCommandIntercept(host: CommandInterceptHost) {
               kind: 'panel',
             })
           }
+        } else if (cmd.kind === 'present') {
+          // 2026-09-22 体验层: 演示模式（投屏/例会只留议题与结论）。
+          // setPresent 精确置位而非 toggle——"退出演示模式"在未开启时不该反而打开。
+          const shellHost = getCommandHost<{ setPresent?: (v: boolean) => void }>('voiceShell')
+          if (typeof shellHost?.setPresent === 'function') {
+            hasPanel = true
+            const want = cmd.action === 'open'
+            try {
+              shellHost.setPresent(want)
+              speech.enqueue({
+                id: `present_${Date.now()}`,
+                text: want ? '已进入演示模式，界面只留议题和结论' : '已退出演示模式',
+                kind: 'panel',
+              })
+            } catch (err) { console.error('[shell] 演示模式切换失败:', err) }
+          }
+        } else if (cmd.kind === 'kiosk') {
+          // 2026-09-24 会客厅轮(S3): 会客厅模式（大球/收起遥测/隐藏经营明细）。
+          // 精确置位而非 toggle——"退出会客厅"在未进入时不该反而进入；设备形态
+          // （--kiosk 启动）下界面内不可退出，由宿主返回 false 拒绝。
+          const kioskHost = getCommandHost<{ setKiosk?: (v: boolean) => boolean }>('voiceShell')
+          if (typeof kioskHost?.setKiosk === 'function') {
+            hasPanel = true
+            const want = cmd.action === 'open'
+            try {
+              const ok = kioskHost.setKiosk(want)
+              speech.enqueue({
+                id: `kiosk_${Date.now()}`,
+                text: ok === false
+                  ? '这台是一体机，会客厅模式始终开启'
+                  : (want ? '已进入会客厅模式' : '已退出会客厅模式'),
+                kind: 'panel',
+              })
+            } catch (err) { console.error('[shell] 会客厅模式切换失败:', err) }
+          }
         } else if (cmd.kind === 'management_cockpit') {
           // 阶段 B: 管理舱（设置/插件/技能/用量/调试）
           const targetMap = COCKPIT_TARGET_MAP

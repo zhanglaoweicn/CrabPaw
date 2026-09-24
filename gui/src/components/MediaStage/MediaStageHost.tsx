@@ -92,11 +92,10 @@ export function MediaStageHost() {
       open={visible}
       onClose={handleClose}
       name="media"
-      // 2026-08-16: 用户反馈"视频窗口占屏比太小"——40vw/480px 音乐卡档对视频过小。
-      // 提至 75vw(≥70% 要求, 组合布局 body.side-sheet-media 按 70vw 档设计),
-      // 封顶 1920px: 2560×1440 屏上仍 ≥75%, 更大屏不再无限放大。
+      // 2026-09-19: 宽度对齐台风/热点面板统一 70vw——此前 75vw/1920px 封顶在
+      // 宽屏上比台风(70vw)更宽, 用户要求视频/文档/台风/热点四类卡片等宽。
       // 高度仍内容驱动(16:9 随宽), fitContent 浮动卡不变。
-      width="min(75vw, 1920px)"
+      width="70vw"
       fitContent
       draggable
       dragOffset={dragOffset ?? undefined}

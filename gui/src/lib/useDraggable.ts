@@ -25,6 +25,24 @@ export interface UseDraggableOptions {
   dragOnButtons?: boolean
 }
 
+/**
+ * 视口钳制（拖动与窗口缩放共用同一套边界语义）。
+ * 左/上界 8-w、右/下界 vw-48——卡片无论拖到哪、窗口怎么缩，都至少留一条边在视口内。
+ * 2026-09-23 抽出共用: 此前钳制只发生在拖动过程中，而位置是持久化的——缩小窗口后
+ * 卡片会永久留在屏外，用户没有任何滚动条能把它找回来（"排版"轮的浮卡互撞修复）。
+ */
+export function clampCardOffset(
+  offset: { x: number; y: number },
+  size: { w: number; h: number },
+  viewport: { w: number; h: number },
+): { x: number; y: number } {
+  const axis = (v: number, lo: number, hi: number) => Math.max(Math.min(lo, hi), Math.min(v, hi))
+  return {
+    x: axis(offset.x, 8 - size.w, viewport.w - 48),
+    y: axis(offset.y, 8 - size.h, viewport.h - 48),
+  }
+}
+
 export function useDraggable({
   enabled,
   offset,

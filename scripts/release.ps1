@@ -46,7 +46,9 @@ if ($DryRun) {
   if ($Version) { node scripts/bump-version.js $Version | Out-Null } else { node scripts/bump-version.js | Out-Null }
   $bumped = (Get-Content "gui\package.json" -Raw | ConvertFrom-Json).version
   Write-Host "package.json version → $bumped"
-  & (Join-Path $PSScriptRoot "build-portable.ps1")
+  # 2026-09-24 修复: build-portable.ps1 在仓库根, 不在 scripts/; 原 $PSScriptRoot 拼出
+  # scripts\build-portable.ps1 不存在(DryRun 演练恰好跳过此调用故未暴露)
+  & (Join-Path $ProjectRoot "build-portable.ps1")
   if (-not (Test-Path (Join-Path $ProjectRoot "CrabPaw-Release\CrabPaw-$bumped-win64-Portable.zip"))) { throw "构建产物缺失" }
 } else {
   Write-Host "`n[2/6] 跳过构建(-SkipBuild)" -ForegroundColor Yellow

@@ -44,6 +44,12 @@ export function useRoundtableChat(pushChat: PushChatFn, dialogChannel: 'classic'
       pushChat('ai', `📄 会议纪要已生成：${doc.name}（已出文件卡，可投递企微）`)
     }, [pushChat]),
     onEnded: useCallback((status: string, error?: string | null) => {
+      // 2026-09-23: 主动中止不是异常——此前非 done 一律报"⚠️ 异常中断"，
+      // 老板自己喊停也会看到红字告警，语义与事实相反。
+      if (status === 'cancelled') {
+        pushChat('ai', '🛑 圆桌会已中止，已产生的发言都保留了。')
+        return
+      }
       if (status !== 'done') pushChat('ai', `⚠️ 圆桌会异常中断：${error || '未知错误'}`)
     }, [pushChat]),
   })

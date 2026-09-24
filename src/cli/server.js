@@ -68,6 +68,45 @@ async function startServer(options = {}) {
   // 2026-09-03 P3 接缝收敛: skill-executor.js 转发壳删除——executeSkill 即 skills.executeSkillAdvanced
   const { executeSkillAdvanced: executeSkill } = require('../core/skills');
 
+  /**
+   * 桥接器子进程输出接线（2026-09-23）。
+   *
+   * 此前飞书/企微两处事件桥接器都写成 stdio: ['ignore','pipe','pipe']，却没有任何
+   * stdout/stderr 读取器——管道的另一端无人排空，后果有两个：
+   *   ①桥接器的报错被整个丢掉：企微桥接器反复"退出，代码: 1"却看不到任何原因，
+   *     日志里只有"已达最大重启次数(5)，停止重启"，此后企微静默失效无法排查
+   *   ②写满操作系统管道缓冲(约 64KB)后，子进程会阻塞在写 stdout 上
+   * 这里按行转发并加方向前缀（`:err` 为 stderr），便于在 server 日志里 grep。
+   */
+  function pipeChildOutput(child, tag) {
+    const wire = (stream, suffix) => {
+      if (!stream) return;
+      stream.setEncoding('utf8');
+      let buf = '';
+      stream.on('data', (chunk) => {
+        buf += chunk;
+        const lines = buf.split(/\r?\n/);
+        buf = lines.pop() || '';
+        for (const line of lines) {
+          const t = line.trim();
+          if (t) console.log(`[${tag}${suffix}] ${t}`);
+        }
+      });
+      stream.on('error', (e) => console.warn(`[${tag}${suffix}] 输出读取失败: ${e.message}`));
+    };
+    wire(child.stdout, '');
+    wire(child.stderr, ':err');
+  }
+
+  /**
+   * 事件桥接器子进程登记（2026-09-23）。
+   *
+   * shutdown() 此前完全不碰桥接器：优雅停止服务后，飞书/企微桥接器会变成孤儿进程，
+   * 继续占着 WebSocket 连接与 38769 端口。这直接命中发行验收清单 §6
+   * 「任务管理器确认无残留 node/electron 进程」——实测 stop 之后企微桥接仍然存活。
+   */
+  const bridgeChildren = [];
+
   profileCheckpoint('start_server_modules_loaded');
 
   const CONFIG_DIR = process.env.CRABPAW_DATA_DIR 
@@ -523,6 +562,42 @@ async function startServer(options = {}) {
 
   const requestHandler = createRequestHandler(serverCtx);
 
+  /**
+   * 退出前清理——统一入口（2026-09-23）。
+   *
+   * 背景：`POST /shutdown` 端点走的是 process.exit(0)，**不经过 shutdown()**，于是
+   * "只写在 shutdown() 里的清理"在停机端点路径上会被整套漏掉。同一类问题已踩两次：
+   * ①解除 Process Watchdog ②终止事件桥接器（后者实测：stop 之后桥接器仍存活）。
+   * 现在把清理挂到 ctx 上，两条退出路径（信号 shutdown() 与 /shutdown）调用同一份，
+   * 新增清理项只需改这一处。
+   */
+  serverCtx.runBeforeExit = () => {
+    try {
+      const { stopWatchdog } = require('../core/process-watchdog');
+      stopWatchdog();
+      console.log('✅ Process Watchdog 已解除');
+    } catch (e) {
+      console.warn('[exit] 解除 Process Watchdog 失败:', e.message);
+    }
+    // 企微桥接走它自己的 stop()：会置位 _stopped，避免它的退出处理再把它拉起来
+    try {
+      const wb = serverCtx.wecomBridge;
+      if (wb && typeof wb.stop === 'function') wb.stop();
+    } catch (e) {
+      console.warn('[exit] 停止企微桥接器失败:', e.message);
+    }
+    for (const b of bridgeChildren) {
+      try {
+        if (b && !b.killed) {
+          b.kill('SIGTERM');
+          console.log(`✅ 已终止事件桥接器 (PID ${b.pid})`);
+        }
+      } catch (e) {
+        console.warn('[exit] 终止事件桥接器失败:', e.message);
+      }
+    }
+  };
+
   const authGuard = authMiddleware({
     apiKey: ADMIN_API_KEY,
     publicRoutes: PUBLIC_ROUTES_SET,
@@ -627,7 +702,11 @@ async function startServer(options = {}) {
     }, 10000);
     
     forceExitTimer.unref();
-    
+
+    // 2026-09-23: 解除守护 + 终止事件桥接器——统一走 runBeforeExit，
+    // 保证与 /shutdown 端点路径的行为一致（此前两处各写一份，端点那条被漏掉过）。
+    serverCtx.runBeforeExit();
+
     try {
       if (cron && typeof cron.stop === 'function') {
         cron.stop();
@@ -1097,6 +1176,10 @@ async function startServer(options = {}) {
         bridge.on('error', (err) => {
           console.error('❌ Lark event bridge start failed:', err.message);
         });
+
+        // 2026-09-23: 接上输出读取器，否则桥接器的报错被丢、管道写满还会卡住子进程
+        pipeChildOutput(bridge, 'LarkBridge');
+        bridgeChildren.push(bridge);   // 关闭时一并终止，防孤儿
         
         bridge.on('exit', (code) => {
           console.log(`⚠️ 飞书事件桥接器退出，代码: ${code}`);
@@ -1120,6 +1203,11 @@ async function startServer(options = {}) {
 
       const wecomBridgePath = path.join(__dirname, '..', 'channels', 'wecom', 'event-bridge.js');
       let wecomBridgeRestarts = 0;
+      // 2026-09-23: 记住"退避重启"定时器，供 stop() 取消。
+      // 此前 setTimeout 的返回值被丢弃 → 无法取消；而 /shutdown 端点有 1.5s 宽限窗口，
+      // 待重启的定时器正好能在窗口内把桥接器又拉起来，进程随即退出 → 留下孤儿桥接
+      // （占着 38769 与企微 WS），发行清单 §6「无残留 node 进程」因此判 FAIL。
+      let wecomBridgeRestartTimer = null;
       const MAX_WECOM_RESTARTS = 5;
       
       const startWecomBridge = function startWecomBridge() {
@@ -1154,6 +1242,14 @@ async function startServer(options = {}) {
         bridge.on('error', (err) => {
           console.error('❌ WeCom event bridge start failed:', err.message);
         });
+
+        // 2026-09-23: 接上输出读取器——企微桥接器"退出, 代码: 1"反复重启却查不到原因，
+        // 正是因为这里的管道无人读取。
+        pipeChildOutput(bridge, 'WeComBridge');
+        bridgeChildren.push(bridge);   // 关闭时一并终止，防孤儿
+        // 2026-09-23: 打出派生 pid，便于与桥接器自身的"终止旧的企业微信桥接进程: PID x"
+        // 对齐——排查"谁杀了谁"（反复 code 1 重启的战斗）
+        console.log(`   (桥接器 PID ${bridge.pid})`);
         
         bridge.on('exit', (code) => {
           console.log(`⚠️ 企业微信事件桥接器退出，代码: ${code}`);
@@ -1167,7 +1263,14 @@ async function startServer(options = {}) {
             if (wecomBridgeRestarts <= MAX_WECOM_RESTARTS) {
               const delay = Math.min(5000 * Math.pow(2, wecomBridgeRestarts - 1), 60000);
               console.log(`🔄 将在 ${delay/1000} 秒后重启 (第 ${wecomBridgeRestarts}/${MAX_WECOM_RESTARTS} 次)...`);
-              setTimeout(startWecomBridge, delay);
+              // 先清掉可能存在的旧定时器（多次 code≠0 会叠加多个待重启，导致启动风暴）
+              if (wecomBridgeRestartTimer) clearTimeout(wecomBridgeRestartTimer);
+              wecomBridgeRestartTimer = setTimeout(() => {
+                wecomBridgeRestartTimer = null;
+                // 停机后再到点：不再拉起（stop() 已置 _stopped）
+                if (serverCtx.wecomBridge?._stopped) return;
+                startWecomBridge();
+              }, delay);
             } else {
               console.error(`❌ 企业微信事件桥接器已达最大重启次数 (${MAX_WECOM_RESTARTS})，停止重启`);
             }
@@ -1193,6 +1296,12 @@ async function startServer(options = {}) {
         },
         stop() {
           this._stopped = true;
+          // 2026-09-23: 取消待执行的退避重启——否则它会在退出宽限窗口内把桥接又拉起来，
+          // 留下孤儿进程（实测：stop 之后仍有一个桥接占着 38769）
+          if (wecomBridgeRestartTimer) {
+            clearTimeout(wecomBridgeRestartTimer);
+            wecomBridgeRestartTimer = null;
+          }
           if (this._bridge && !this._bridge.killed) {
             console.log("⏹️ 手动停止企业微信事件桥接器");
             this._bridge.kill("SIGTERM");

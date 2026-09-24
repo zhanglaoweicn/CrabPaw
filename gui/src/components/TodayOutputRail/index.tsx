@@ -13,6 +13,7 @@
  * 无今日产物整条不渲染（诚实降级）。
  */
 import { useEffect, useState } from 'react'
+import { Package } from 'lucide-react'
 import { apiGet } from '../../lib/api'
 import { formatFileSize } from '../../lib/attachment'
 
@@ -136,7 +137,7 @@ export function TodayOutputRail() {
         }}
         title="今天生成的文档产物"
       >
-        📦 今日产出 <span style={{ fontWeight: 700 }}>{count}</span>
+        <Package size={12} aria-hidden /> 今日产出 <span style={{ fontWeight: 700 }}>{count}</span>
         <span style={{ opacity: 0.6 }}>{expanded ? '▾' : '▸'}</span>
       </button>
     </span>

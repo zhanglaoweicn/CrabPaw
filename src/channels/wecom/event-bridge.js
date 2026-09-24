@@ -27,22 +27,36 @@ try {
   if (fs.existsSync(PID_FILE_PATH)) {
     const oldPid = parseInt(fs.readFileSync(PID_FILE_PATH, 'utf-8').trim(), 10);
     if (oldPid && oldPid !== process.pid) {
-      try { process.kill(oldPid, 0); } catch (e) {
-        // 旧进程不存在，清理 PID 文件
-        fs.unlinkSync(PID_FILE_PATH);
+      // 2026-09-23: 只在目标确实存活时才终止（原实现把 SIGTERM 放在存活检查之外，
+      // 旧 pid 已死时仍会执行，只是被自己的 catch 吞掉）；并去掉最长 3 秒的同步忙等
+      // （while 轮询 process.kill(pid,0) —— 阻塞事件循环、空转烧 CPU）。
+      // 单实例的真正保障不靠这里：企微服务端每个机器人只允许一条连接，
+      // 新桥接连上会把旧的顶掉，而被顶的那个现在会干净退出（见 disconnected 处理）。
+      let alive = true;
+      try { process.kill(oldPid, 0); } catch { alive = false; }
+      if (alive) {
+        try {
+          process.kill(oldPid, 'SIGTERM');
+          console.log(`🔄 终止旧的企业微信桥接进程: PID ${oldPid}`);
+        } catch (e) { console.warn('终止旧桥接进程失败:', e.message); }
+      } else {
+        try { fs.unlinkSync(PID_FILE_PATH); } catch { /* 忽略 */ }
       }
-      try {
-        process.kill(oldPid, 'SIGTERM');
-        console.log(`🔄 终止旧的企业微信桥接进程: PID ${oldPid}`);
-        const start = Date.now();
-        while (Date.now() - start < 3000) {
-          try { process.kill(oldPid, 0); } catch (e) { break; /* 进程已退出 */ }
-        }
-      } catch (e) { console.warn('终止旧桥接进程失败:', e.message) }
     }
   }
   fs.writeFileSync(PID_FILE_PATH, process.pid.toString());
 } catch (e) { console.warn('PID 文件管理失败:', e.message) }
+
+/**
+ * 断开原因是否为"被新连接顶号"（2026-09-23）。
+ * 企微服务端对每个机器人只允许一条连接：新桥接连上后，服务端踢掉旧连接并下发该事件。
+ * 实测措辞为 "New connection established, server disconnected this connection"
+ * （SDK 另有一条 disconnected_event 前缀的 WARN），这里放宽匹配，避免措辞微调后漏判。
+ */
+function _isReplacedByNewConnection(reason) {
+  const r = String(reason || '').toLowerCase();
+  return r.includes('new connection') || r.includes('disconnected_event');
+}
 
 function _convertMarkdownTableToAlignedText(text) {
   const lines = text.split('\n');
@@ -746,7 +760,25 @@ function startWecomClient() {
   wsClient.on('disconnected', (reason) => {
     console.log(`⚠️ 企业微信连接断开: ${reason || '未知原因'}`);
     updateWecomStatus(false);
-    
+
+    // 2026-09-23: 被"新连接"顶号 —— 不要重连，干净退出。
+    //
+    // 企微服务端对每个机器人只允许一条 WebSocket 连接：哪个桥接新连上，服务端就把
+    // 旧连接踢掉并下发 disconnected_event("a new connection has been established")。
+    // 此前这里无条件走重连逻辑，于是"被顶号的那个又连回去、再顶别人"，形成互相顶号的
+    // 无限循环：每次退出都报 code 1 且无任何输出，服务端按退避重启 5 次后永久放弃，
+    // 企微从此静默失效（直到下次整体重启）——实测到的正是这个循环。
+    // 正确语义：被顶号说明已经有更新的桥接接管了这个机器人，旧的自行退场即可。
+    // 用 exit(0) 而非 exit(1)：服务端只对非 0 退出做重启（见 server.js 的 exit 处理），
+    // 退 0 就不会再被拉起来顶回去。
+    if (_isReplacedByNewConnection(reason)) {
+      console.log('🛑 已被更新的桥接连接顶替，本进程退出（不重连，避免互相顶号）');
+      isShuttingDown = true;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      setTimeout(() => process.exit(0), 300);
+      return;
+    }
+
     const isRateLimited = String(reason).includes('45009') || String(reason).includes('freq out of limit');
     if (isRateLimited) {
       rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN;

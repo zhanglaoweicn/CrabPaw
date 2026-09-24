@@ -22,6 +22,14 @@ export interface ChatInputAreaProps {
   roundtableGoal: string
   roundtableMuted: boolean
   onToggleRoundtableMuted: () => void
+  /** 圆桌会进度（2026-09-22）：阶段人话标签 + 已发言/到场人数。
+   *  数据源是后端一向就在广播、前端此前从未订阅的 roundtable:phase。 */
+  roundtablePhaseLabel?: string
+  roundtableSpoken?: number
+  roundtableTotal?: number
+  /** 2026-09-23 中止：请求已发出（按钮转"中止中…"直到会议真正收尾）+ 触发回调 */
+  roundtableCancelling?: boolean
+  onCancelRoundtable?: () => void
   /** 审批接管：>0 显示横幅并禁用输入 */
   approvalPendingCount: number
   onApprovalActiveChange: (n: number) => void
@@ -51,6 +59,11 @@ export function ChatInputArea({
   roundtableGoal,
   roundtableMuted,
   onToggleRoundtableMuted,
+  roundtablePhaseLabel,
+  roundtableSpoken,
+  roundtableTotal,
+  roundtableCancelling,
+  onCancelRoundtable,
   approvalPendingCount,
   onApprovalActiveChange,
   attachments,
@@ -79,6 +92,45 @@ export function ChatInputArea({
           <span className="voice-shell-approval-banner-text" style={{ flex: 1 }}>
             🪑 圆桌会进行中 · 此刻说话=老板插话，全场会听取{roundtableGoal ? `（议题：${roundtableGoal}）` : ''}
           </span>
+          {/* 2026-09-22 进度可见：此前只有"进行中"一句，老板不知道到第几轮、
+              几位专家发过言。阶段与人数都来自后端既有 roundtable:phase / statement。 */}
+          {roundtablePhaseLabel ? (
+            <span className="voice-shell-approval-banner-chip" title="当前会议阶段">
+              {roundtablePhaseLabel}
+            </span>
+          ) : null}
+          {roundtableTotal ? (
+            <span
+              className="voice-shell-approval-banner-chip"
+              title="已发言专家 / 到场专家（同一专家多轮只计一位）"
+            >
+              {roundtableSpoken ?? 0}/{roundtableTotal} 位已发言
+            </span>
+          ) : null}
+          {onCancelRoundtable && (
+            <button
+              type="button"
+              onClick={onCancelRoundtable}
+              disabled={roundtableCancelling}
+              title={
+                roundtableCancelling
+                  ? '已请求中止，正在等当前发言结束'
+                  : '中止本场会议（已产生的发言会保留；正在发言的专家会说完这句）'
+              }
+              style={{
+                background: 'none',
+                border: '1px solid rgba(248,113,113,0.45)',
+                borderRadius: 'var(--radius-full)',
+                cursor: roundtableCancelling ? 'default' : 'pointer',
+                color: roundtableCancelling ? 'var(--text-muted)' : 'var(--color-error)',
+                fontSize: 11,
+                flexShrink: 0,
+                padding: '1px 8px',
+              }}
+            >
+              {roundtableCancelling ? '中止中…' : '中止'}
+            </button>
+          )}
           <button
             type="button"
             onClick={onToggleRoundtableMuted}
@@ -138,13 +190,16 @@ export function ChatInputArea({
           onBlur={() => { composingRef.current = false }}
           onKeyDown={(e) => { if (e.key === 'Enter' && !composingRef.current) onSubmit() }}
           /* 2026-08-25 界面对齐: placeholder 随语音模式给出常驻操作提示 */
+          /* 2026-09-23 排版轮: 静音态不再重复"语音已关闭"（底部状态条已说一次，且
+             "点击左侧语音球"在极简布局是错的——球是居中/可拖动的浮动卡，左栏此时
+             根本不显示；方位词一律去掉，状态词统一由底部条承担） */
           placeholder={approvalPendingCount > 0
             ? '审批处理中…'
             : attachments.length > 0 ? '补充说明（可选）…'
-            : muted ? '语音已关闭 · 点击左侧语音球开启语音'
-            : pttOnly ? '␣ 按住空格键开始说话 · 或输入文字回车发送'
+            : muted ? '输入文字回车发送'
+            : pttOnly ? '按住空格键开始说话 · 或输入文字回车发送'
             : continuousMode ? '实时监听中 · 直接说话 · 或输入文字回车发送'
-            : '⚡ 输入文字回车发送 · 空格说话或说唤醒词'}
+            : '输入文字回车发送 · 空格说话或说唤醒词'}
           disabled={uploading || approvalPendingCount > 0}
         />
         {/* 2026-08-14 ag-ui 二次分析: 生成中按钮合一为 ⏹ 停止(发送/停止切换,
@@ -161,7 +216,7 @@ export function ChatInputArea({
       <div className="voice-shell-chat-input-footer">
         <span className="voice-shell-chat-input-footer-dot" />
         {muted
-          ? '已静音 · 点击左侧语音球恢复声音'
+          ? '语音已关闭 · 点一下语音球开启'
           : pttOnly
             ? '按住空格键开始说话'
             : continuousMode

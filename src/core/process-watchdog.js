@@ -57,6 +57,21 @@ class ProcessWatchdog {
       fs.mkdirSync(WATCHDOG_DIR, { recursive: true });
     }
 
+    // 2026-09-23: 清理上一轮 stop() 留下的停止标记。
+    // 此前 start() 不清理：停过一次之后再启动，新 fork 的守护会在首次巡检(≤10s)读到
+    // 仍是 stopped 的标记而 process.exit(0) 自杀——服务照跑，但从此无人监管。
+    // 位置必须在 _forkWatchdog() 之前，否则有竞态（守护可能先读到标记）。
+    try {
+      if (fs.existsSync(WATCHDOG_STATE_FILE)) {
+        const st = JSON.parse(fs.readFileSync(WATCHDOG_STATE_FILE, 'utf-8'));
+        if (st && st.status === 'stopped') {
+          fs.unlinkSync(WATCHDOG_STATE_FILE);
+        }
+      }
+    } catch (e) {
+      console.warn('[process-watchdog] 清理停止标记失败:', e.message);
+    }
+
     // 写入初始心跳
     this._writeHeartbeat();
 

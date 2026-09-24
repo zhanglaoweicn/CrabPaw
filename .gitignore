@@ -147,6 +147,10 @@ voice_session_eval*.json
 .claude/
 /memory/
 data/expert-stats.json
+# 2026-09-22: 营销物料(开箱/更新指引)不进仓——本地保留, 随 U 盘交付/售后群分发
+# 用户口径: 只同步代码与技术文档到 GitHub 公开仓
+docs/commercial/
+
 docs/superpowers/
 docs/audit/
 docs/retrospective/

@@ -98,9 +98,16 @@
 }
 
 .command-palette-item:hover,
-.command-palette-item:focus-visible {
+.command-palette-item:focus-visible,
+.command-palette-item.is-active {
   background: rgba(249, 115, 22, 0.12);
   outline: none;
+}
+
+/* 2026-09-22: 键盘/鼠标共用的当前项高亮——此前只有 hover，方向键选到哪一项
+   界面上完全看不出来；左侧强调条让"回车会执行哪一条"一目了然。 */
+.command-palette-item.is-active {
+  box-shadow: inset 2px 0 0 var(--accent-primary);
 }
 
 .command-palette-item em {

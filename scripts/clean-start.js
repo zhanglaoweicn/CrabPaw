@@ -182,12 +182,54 @@ function spawnServer() {
   return child;
 }
 
+/**
+ * 重启/接管前，先把服务 fork 的 watchdog 收干净（2026-09-23）。
+ *
+ * 背景：服务进程内会 fork 一个独立 watchdog（_watchdog_runner.js，心跳丢失即重启服务）。
+ * 这里重启用 child.kill('SIGTERM')——Windows 上那是硬终止(TerminateProcess)，服务的
+ * exit handler 不会跑，它 fork 的 watchdog 就此变成孤儿。每重启一次累积一个：
+ * 实测一轮后端编辑后累积到 5 个 runner 进程，各自还会尝试重启服务。
+ *
+ * 收法（两道，用作者预留的 _runner.pid："记录本 runner 的 pid，供外部清理"）：
+ *   ①写停止标记 → 存活 runner 在下次巡检(≤10s)自行退出
+ *   ②按 _runner.pid 直接终止最近那个 runner（立即生效，覆盖竞态）
+ * 不能只写标记：新服务启动时 start() 会清理该标记，若新服务先清、老 runner 还没巡检到，
+ * 老 runner 就活下来了——所以补一道按 pid 直杀。
+ */
+function disarmWatchdogBeforeRestart() {
+  const dataDir = process.env.CRABPAW_DATA_DIR || path.join(__dirname, '..', 'data', '.crabpaw');
+  const watchdogDir = path.join(dataDir, 'watchdog');
+  const stateFile = path.join(watchdogDir, 'state.json');
+  const runnerPidFile = path.join(watchdogDir, '_runner.pid');
+
+  try {
+    fs.mkdirSync(watchdogDir, { recursive: true });
+    fs.writeFileSync(stateFile, JSON.stringify({ status: 'stopped', stoppedAt: Date.now() }, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn(`  ⚠️  写守护停止标记失败: ${e.message}`);
+  }
+
+  try {
+    const raw = fs.readFileSync(runnerPidFile, 'utf-8').trim();
+    const pid = Number.parseInt(raw, 10);
+    if (Number.isFinite(pid) && pid > 0) {
+      process.kill(pid, 'SIGKILL');
+      console.log(`  🐕 已回收上次的 watchdog runner (PID ${pid})`);
+    }
+  } catch (e) {
+    // ESRCH = runner 已自行退出，属正常
+    if (e.code !== 'ESRCH') console.warn(`  ⚠️  回收 watchdog runner 失败: ${e.message}`);
+  }
+}
+
 function scheduleRestart() {
   if (restartTimer || stopping) return;
   restartTimer = setTimeout(() => {
     restartTimer = null;
     if (stopping) return;
     console.log('\n🔁 检测到源码变更，重启服务器...');
+    // 先收孤儿守护，再杀服务：反过来的话新服务启动会清掉停止标记，老守护可能漏网
+    disarmWatchdogBeforeRestart();
     if (child) {
       try { child.kill('SIGTERM'); } catch { /* 进程可能已退出 */ }
     }

@@ -23,6 +23,8 @@ export type SoundType =
   | 'button-click'
   | 'voice-start'
   | 'voice-end'
+  | 'task-start'
+  | 'task-done'
   | 'error'
 
 // ─── 音效参数配置 ──────────────────────────────────────
@@ -41,6 +43,10 @@ const SOUND_CONFIGS: Record<SoundType, SoundConfig> = {
   'button-click':  { freqStart: 1000, freqEnd: 1000, duration: 30, type: 'square',   gain: 0.08 },
   'voice-start':   { freqStart: 300, freqEnd: 500,  duration: 200, type: 'triangle', gain: 0.10 },
   'voice-end':     { freqStart: 500, freqEnd: 300,  duration: 150, type: 'triangle', gain: 0.10 },
+  // 2026-09-24 会客厅轮(S5): 任务音——"开始执行"低音垫（像机器启动）+ "完成"两声确认。
+  // 只出声不发言（完成的语音播报由 lib/notices 负责，避免双声）。
+  'task-start':    { freqStart: 180, freqEnd: 120,  duration: 420, type: 'sine',     gain: 0.10 },
+  'task-done':     { freqStart: 660, freqEnd: 990,  duration: 260, type: 'triangle', gain: 0.13 },
   'error':         { freqStart: 220, freqEnd: 180,  duration: 300, type: 'sawtooth', gain: 0.12 },
 }
 

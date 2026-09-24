@@ -118,6 +118,8 @@ export function usePushToTalk(options: UsePushToTalkOptions = {}): UsePushToTalk
   const lastInboundTsRef = useRef(0)
   /** 最近听到人声级音量的时刻（Date.now，sendPcm 写） */
   const lastLoudTsRef = useRef(0)
+  /** 2026-09-24: 球体能量广播节流（60ms ≈ 16Hz，与聆听/播报共用一条视觉通道） */
+  const fastEmitTsRef = useRef(0)
 
   // Refs — commitPendingInterim
   /** 重连前已识别的前半句文本（重连后新会话的 seg 会重新计数，前半句需冻结保住） */
@@ -451,6 +453,19 @@ export function usePushToTalk(options: UsePushToTalkOptions = {}): UsePushToTalk
     const vol = computeVol(pcm)
     if (vol > WATCHDOG_SPEECH_VOL) {
       lastLoudTsRef.current = Date.now()
+    }
+    // 2026-09-24: 把 PTT 音量也喂给球（60ms ≈ 16Hz，与聆听/播报同一条视觉通道）。
+    // 此前 PTT 链路没有任何电平出口 → 按住空格说话时球是静止的绿球，而实时通道
+    // （走 ASR 会话帧）会跟着声音动——这就是"空格对话与实时对话球体波动不一样"。
+    // 用原始信号（与静音判定同口径，AGC 会放大噪声不适合做视觉电平）。
+    const nowFast = Date.now()
+    if (nowFast - fastEmitTsRef.current >= 60) {
+      fastEmitTsRef.current = nowFast
+      try {
+        window.dispatchEvent(new CustomEvent('crabpaw:voice-energy-fast', { detail: vol }))
+      } catch (e) {
+        console.warn('[PTT] 球体能量广播失败:', (e as Error)?.message || e)
+      }
     }
 
     // 2026-08-14: 静音门控——此前每帧全送(128ms/块),按住不说话也持续烧 API 配额。

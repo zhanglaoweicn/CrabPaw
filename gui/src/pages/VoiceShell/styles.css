@@ -14,7 +14,15 @@
   flex-direction: column;
   background: linear-gradient(180deg, #000000 0%, #04050e 55%, #000000 100%);
   color: var(--text-primary, #f3f5fb);
-  overflow: hidden;
+  /* 2026-09-23 视觉验收发现: 此处原为 overflow: hidden。装饰极光层 .voice-shell::before
+     用 inset: -18% 向四周各溢出约 18%（1920 宽下 ~345px），使壳层始终有约 350px 的
+     可滚余量；而 overflow: hidden 只是隐藏滚动条、并不阻止程序化滚动——任何
+     focus()/scrollIntoView()（含自动化点击的自动滚入）都会把整个三栏界面横向推走，
+     把左栏推到屏幕外，且用户没有滚动条可以滚回来。
+     overflow: clip 不创建滚动容器：装饰溢出照旧被裁掉，但内容再也不会被滚走。
+     实测（本机 1920×1040）：改前 scrollLeft 可被置到 198→ 左栏 x=-182（半屏外）；
+     改后 scrollLeft 恒为 0，左栏稳定在 x=16。 */
+  overflow: clip;
   z-index: var(--z-shell);
 }
 
@@ -413,7 +421,7 @@
   font-size: 10px;
   padding: 0;
 }
-.vs-attachment-remove:hover { color: #f87171; }
+.vs-attachment-remove:hover { color: var(--color-error); }
 .vs-upload-pct {
   color: rgba(56, 189, 248, 0.9);
   font-weight: 600;
@@ -554,7 +562,7 @@
   align-items: center;
   justify-content: center;
 }
-.vs-config-close:hover { color: #f87171; border-color: rgba(244, 67, 54, 0.4); }
+.vs-config-close:hover { color: var(--color-error); border-color: rgba(244, 67, 54, 0.4); }
 
 /* G1: 配置面板底栏 + 加载态 + 未保存变更确认（对齐 Dashboard 设置浮层交互） */
 .vs-config-full-foot {
@@ -1081,7 +1089,7 @@
   border-radius: 6px;
   transition: color 0.15s;
 }
-.session-drawer-close:hover { color: #f87171; }
+.session-drawer-close:hover { color: var(--color-error); }
 .session-drawer-body {
   flex: 1;
   min-height: 0;
@@ -1827,13 +1835,28 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #fbbf24;
+  background: var(--color-warning);
   box-shadow: 0 0 6px rgba(251, 191, 36, 0.8);
   animation: heartbeat-pulse 1.2s ease-in-out infinite;
   flex-shrink: 0;
 }
 .voice-shell-approval-banner-text {
   color: rgba(251, 191, 36, 0.9);
+}
+
+/* 2026-09-22 体验层: 横幅上的信息 chip（圆桌会阶段 / 已发言人数）。
+   与 banner-text 同色系但更弱——是补充信息，不抢主句。 */
+.voice-shell-approval-banner-chip {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1.6;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  background: rgba(251, 191, 36, 0.1);
+  color: rgba(251, 191, 36, 0.85);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── 2026-08-19 三栏联动轮: 点击消息 → 时间线定位。
@@ -2401,7 +2424,7 @@ button.typhoon-map-legend-row:hover { color: #fff; }
 }
 .stock-index-name { font-size: 12px; color: var(--text-secondary, #aaa); }
 .stock-index-price { font-size: 13px; font-weight: 700; color: var(--text-primary, #eee); font-family: Consolas, monospace; }
-.stock-failed { font-size: 11px; color: #fbbf24; }
+.stock-failed { font-size: 11px; color: var(--color-warning); }
 .stock-disclaimer { font-size: 10px; color: var(--text-muted, rgba(148,163,184,0.5)); }
 
 /* ===== 2026-08-16 股票分析化：收藏条/综合建议/分析四卡 ===== */
@@ -2429,16 +2452,16 @@ button.typhoon-map-legend-row:hover { color: #fff; }
 .stock-verdict-rating--neutral { background: rgba(148,163,184,0.2); color: #cbd5e1; }
 .stock-verdict-rating--avoid { background: rgba(56,189,248,0.18); color: #7dd3fc; }
 .stock-verdict-score { font-size: 11px; color: var(--text-muted, #94a3b8); }
-.stock-verdict-fallback { font-size: 10px; color: #fbbf24; border: 1px dashed rgba(251,191,36,0.4); border-radius: 4px; padding: 1px 5px; }
+.stock-verdict-fallback { font-size: 10px; color: var(--color-warning); border: 1px dashed rgba(251,191,36,0.4); border-radius: 4px; padding: 1px 5px; }
 .stock-verdict-points { display: flex; gap: 14px; margin-bottom: 8px; }
 .stock-verdict-point { display: flex; flex-direction: column; gap: 2px; }
 .stock-verdict-point-label { font-size: 10px; color: var(--text-muted, #94a3b8); }
 .stock-verdict-point-val { font-size: 15px; font-weight: 700; font-family: Consolas, monospace; }
 .stock-verdict-point--buy .stock-verdict-point-val { color: #10b981; }
 .stock-verdict-point--sell .stock-verdict-point-val { color: #f43f5e; }
-.stock-verdict-point--pos .stock-verdict-point-val { color: #fbbf24; }
+.stock-verdict-point--pos .stock-verdict-point-val { color: var(--color-warning); }
 .stock-verdict-summary { font-size: 12px; color: var(--text-secondary, #bbb); line-height: 1.5; }
-.stock-verdict-risk { font-size: 11px; color: #fbbf24; margin-top: 6px; }
+.stock-verdict-risk { font-size: 11px; color: var(--color-warning); margin-top: 6px; }
 .stock-verdict-src { font-size: 10px; color: var(--text-muted, rgba(148,163,184,0.6)); margin-top: 6px; }
 
 .stock-analysis-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
@@ -2472,7 +2495,7 @@ button.typhoon-map-legend-row:hover { color: #fff; }
 .stock-news-meta { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
 .stock-news-src { font-size: 9px; border-radius: 4px; padding: 0 4px; }
 .stock-news-src--新闻 { color: #93c5fd; background: rgba(59,130,246,0.15); }
-.stock-news-src--公告 { color: #fbbf24; background: rgba(245,158,11,0.15); }
+.stock-news-src--公告 { color: var(--color-warning); background: rgba(245,158,11,0.15); }
 .stock-news-src--股吧 { color: #c4b5fd; background: rgba(139,92,246,0.15); }
 .stock-news-time { font-size: 10px; color: var(--text-muted, rgba(148,163,184,0.5)); }
 .stock-news-more { margin-top: 6px; width: 100%; padding: 4px 0; font-size: 11px; color: var(--text-muted, rgba(148,163,184,0.8)); background: none; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; cursor: pointer; }
@@ -2829,6 +2852,204 @@ body.side-sheet-media .voice-shell[data-layout='simple'] .voice-shell-chat-col {
 /* 2026-08-31: 对话卡收缩态——隐藏对话列(小胶囊替代), 展开恢复 */
 .voice-shell[data-layout='simple'][data-chat-collapsed='true'] .voice-shell-chat-row {
   display: none;
+}
+
+/* ─── 2026-09-22 体验层: 演示模式（data-layout="present"） ────────────────
+   场景: 例会 / 圆桌会 / 投屏。此前投出去的是左栏「用户消息处理器」事件日志 +
+   Memory/Decayed 计数 + 右下遥测浮卡——给老板看的界面被投成了给工程师看的。
+   这里把界面收成「只留议题与结论」: 隐两侧栏与遥测浮卡, 放大正文与决策卡。
+   叠加在 layoutMode 之上, 退出后原布局原样恢复（不改 simple/advanced 语义）。 */
+.voice-shell[data-layout='present'] .voice-shell-sidebar { display: none; }
+
+/* 遥测浮卡与右上角场景历史堆叠条——投屏时都属噪音 */
+.voice-shell[data-layout='present'] .collab-orbit,
+.voice-shell[data-layout='present'] .holo-history { display: none; }
+
+/* 对话列铺满并居中, 正文放大到远场可读（1-2 米观看距离, 与 --font-body-far 同口径） */
+.voice-shell[data-layout='present'] .voice-shell-stage { padding-bottom: 24px; }
+.voice-shell[data-layout='present'] .voice-shell-chat-row {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.voice-shell[data-layout='present'] .voice-shell-chat-col {
+  font-size: var(--font-body-far);
+}
+
+/* 结论优先: 决策卡是投屏时全场真正要看的东西, 放大一档 */
+.voice-shell[data-layout='present'] .chatcard-decision {
+  font-size: 15px;
+  line-height: 1.75;
+}
+.voice-shell[data-layout='present'] .chatcard-msg-bubble {
+  font-size: var(--font-body-far);
+  line-height: 1.75;
+}
+
+/* ─── 2026-09-23 排版轮: 球体状态词 ───────────────────────────────────────
+   贴在球正下方，替代"状态只在右侧对话卡顶栏可见（离球约 300px）"。
+   状态点沿用球体四态自身的颜色（绿=在听 / 蓝=在说 / 橙=在想 / 白=关闭）。 */
+.voice-shell-orb-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  user-select: none;
+}
+.voice-shell-orb-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(235, 245, 252, 0.55);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+.voice-shell-orb-state[data-orb-mode='listening'] .voice-shell-orb-state-dot {
+  background: #5ac887;
+  box-shadow: 0 0 6px rgba(90, 200, 135, 0.8);
+}
+.voice-shell-orb-state[data-orb-mode='speaking'] .voice-shell-orb-state-dot {
+  background: #50b4ff;
+  box-shadow: 0 0 6px rgba(80, 180, 255, 0.8);
+}
+.voice-shell-orb-state[data-orb-mode='thinking'] .voice-shell-orb-state-dot {
+  background: #f98c28;
+  box-shadow: 0 0 6px rgba(249, 140, 40, 0.8);
+}
+.voice-shell-orb-state[data-muted='true'] .voice-shell-orb-state-dot {
+  background: rgba(235, 245, 252, 0.55);
+  box-shadow: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-shell-orb-state-dot { transition: none; }
+}
+
+/* 2026-09-24 会客厅轮: 右上角历史堆叠条的"其它类型"圆点（原为 ● 字符，去 emoji 后用小圆点） */
+.holo-history-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ─── 2026-09-24 会客厅轮(S3): 顶栏图标分组（组间细竖线，避免五个图标平铺误点） ─── */
+.voice-shell-header-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 8px;
+  margin-right: 8px;
+  border-right: 1px solid rgba(255, 255, 255, 0.10);
+}
+.voice-shell-header-group:last-of-type {
+  border-right: none;
+  margin-right: 0;
+  padding-right: 0;
+}
+
+/* ─── 2026-09-24 会客厅轮(S3): 一体机 / 会客厅形态（data-kiosk） ──────────────
+   挂在墙上、1–2m 观看距离：正文放大到远场可读、触摸热区 ≥44px、卡片"去盒子"
+   （去掉 1px 边框/投影/模糊——信息直接浮在深空底上，从"深色后台"变"装置"）。
+   与演示模式（data-layout='present'）叠加，不互相替代：本形态是"这台机器的形态"，
+   演示模式是"临时只留结论"。 */
+.voice-shell[data-kiosk='true'] .voice-shell-chat-col {
+  font-size: var(--font-body-far);
+}
+.voice-shell[data-kiosk='true'] .chatcard-msg-bubble {
+  font-size: var(--font-body-far);
+  line-height: 1.75;
+}
+.voice-shell[data-kiosk='true'] .chatcard-decision {
+  font-size: 15px;
+  line-height: 1.75;
+}
+.voice-shell[data-kiosk='true'] .sfc {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.voice-shell[data-kiosk='true'] .sfc-title {
+  border-bottom-color: transparent;
+}
+.voice-shell[data-kiosk='true'] .voice-shell-console-btn,
+.voice-shell[data-kiosk='true'] .voice-shell-chat-clear-btn,
+.voice-shell[data-kiosk='true'] .voice-shell-win-btn {
+  min-width: 44px;
+  min-height: 44px;
+}
+.voice-shell[data-kiosk='true'] .holo-stage-stack-chip,
+.voice-shell[data-kiosk='true'] .voice-shell-suggest-chip {
+  min-height: 44px;
+}
+
+/* 待机主屏：时间 + 一行大字要事（贴在球下方，1–2m 可读；不拦截指针） */
+.voice-shell-standby {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  pointer-events: none;
+}
+.voice-shell-standby-time {
+  font-size: 26px;
+  font-weight: 200;
+  letter-spacing: 0.14em;
+  color: rgba(235, 245, 252, 0.60);
+  font-variant-numeric: tabular-nums;
+}
+.voice-shell-standby-line {
+  font-size: 20px;
+  font-weight: 600;
+  color: rgba(235, 245, 252, 0.88);
+  text-align: center;
+  line-height: 1.45;
+  max-width: 900px;
+}
+.voice-shell-standby-line strong {
+  color: #5ac887;
+  font-weight: 700;
+}
+
+/* S4 执行叙事（会客厅）：把"正在干什么"放大成客人也看得懂的一行 */
+.voice-shell-exec-narrative {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 12px 0;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 18px;
+  font-weight: 600;
+  color: rgba(235, 245, 252, 0.92);
+}
+.voice-shell-exec-spin {
+  animation: exec-spin 1.4s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes exec-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-shell-exec-spin { animation: none; }
+}
+
+/* 空态次要建议行（有真实数据时，通用 chip 降级为次要） */
+.voice-shell-suggest--secondary {
+  opacity: 0.62;
+  margin-top: 2px;
+}
+.voice-shell-suggest-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: 4px;
+  align-self: center;
 }
 
 /* ─── 2026-08-31: 液态玻璃背景色带(参考 iOS 控制中心——波光琉璃从玻璃后流动) ───

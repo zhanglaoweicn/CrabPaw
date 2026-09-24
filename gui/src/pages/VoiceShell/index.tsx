@@ -18,7 +18,7 @@
  * 语音机制：由 useVoiceChatFlow（chat 流 → TTS 接线）+ VoiceIntegration（三模式）编排。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { AmbientGlow } from '../../components/AmbientGlow'
 import { MorningBriefingStrip } from '../../components/MorningBriefingStrip'
 // ── 2026-09-21 P2-1 拆分: 语音配置域/对话类型/单条消息渲染移出主文件 ──
@@ -27,6 +27,7 @@ import type { ChatMsg, ChatMsgFile } from './types'
 import { ChatMessageItem, ChatEmptyState, StreamingBubble, RtTypingIndicator } from './ChatMessages'
 import { ChatInputArea } from './ChatInputArea'
 import { useRoundtableChat } from './useRoundtableChat'
+import { rtPhaseLabel } from '../../hooks/useRoundtable'
 import { useChatMessages, nextChatTs } from './useChatMessages'
 import { useCommandIntercept } from './useCommandIntercept'
 import TaskOrbit from '../../components/TaskOrbit'
@@ -47,12 +48,14 @@ import { apiGet } from '../../lib/api'
 import { useDraggable } from '../../lib/useDraggable'
 import { ShellFloatCard } from '../../components/ShellFloatCard'
 import { sweepCompositorDeferred } from '../../lib/compositor'
+import { playSound } from '../../hooks/useSoundEffects'
 import { HeartbeatCard } from '../../components/HeartbeatCard'
 import { SysInfoCard } from '../../components/SysInfoCard'
 import { fileUrlFor } from '../../lib/attachment'
 import { isCardWallKind, loadDismissedKeys, saveDismissedKeys } from '../../lib/surface-utils'
 import { nextPhaseThreshold, phaseText, sceneFromPhase } from '../../lib/holo-phase'
-import { Minus, Square, X, Columns, RotateCcw, LayoutDashboard, History, Brush, ChevronDown,  } from 'lucide-react'
+import { Minus, Square, X, Columns, RotateCcw, LayoutDashboard, History, Brush, ChevronDown, Presentation, MessageSquare, ListChecks, Activity, AudioLines, Sun, Megaphone, Tv, Loader2 } from 'lucide-react'
+import { isKioskDevice, getKioskOverride, setKioskOverride } from '../../lib/kiosk-mode'
 import { toast } from 'sonner'
 import { ManagementCockpit, type CockpitTab } from '../../components/ManagementCockpit'
 import { COCKPIT_TAB_MAP } from '../../lib/cockpit-navigation'
@@ -61,6 +64,10 @@ import { executeCommand, getCommandHost, registerCommandHost } from '../../lib/u
 import { COMMAND_DEFS } from '../../lib/command-defs'
 import CommandPalette from '../../components/CommandPalette'
 import { SessionDrawer } from './SessionDrawer'
+// 2026-09-23 排版轮: 极简布局左列第一位改成「要办的事」——与高级布局同一个账本组件
+import { TaskLedger } from './TaskLedger'
+import { announce, getNotices, subscribeNotices } from '../../lib/notices'
+import { useConfirm } from '../../components/useConfirm'
 import { AgentLeftPanel } from './AgentLeftPanel'
 import { OrbTopBlock } from './OrbTopBlock'
 import { AgentRightPanel } from './AgentRightPanel'
@@ -86,6 +93,53 @@ import './styles.css'
 // ── 2026-09-21 P2-1 拆分: ShellVoiceConfig/SHELL_VOICE_DEFAULTS/normalizeVoiceSection/
 // voiceSectionForShell/fetchConfigForShell 整域移至 ./shellVoiceConfig（纯搬运零行为变化）
 
+// ── 2026-09-23 排版轮: 极简布局几何（单一事实源，避免三处硬编码漂移） ──
+/** 左列浮卡宽（与 SysInfoCard/HeartbeatCard 同宽） */
+const SIMPLE_LEFT_W = 264
+/** 球卡宽（ShellFloatCard width，与 VoiceOrb size 250 配套） */
+const ORB_CARD_W = 442
+/** 对话卡宽上限（styles.css 的 min(33.44vw, 404.8px)） */
+const CHAT_CARD_MAX_W = 404.8
+const SIMPLE_LEFT_X = 24
+const SIMPLE_GAP = 16
+/**
+ * 球卡锚点：优先居中；放不下时贴到对话卡左侧；左侧也放不下（视口窄于 ORB_INLINE_BELOW）
+ * 则整块改为内联到对话卡上方（见 chat-col 的 orb-top-inline）。
+ * 三张卡互不重叠需要 innerWidth ≳ 1240：左列右缘 304 + 球卡 442 + 间隙 16 + 对话卡
+ * (min(33.44vw,404.8)) + 右边距 24 —— 旧实现恒居中，1280 宽时就已经压上对话卡 10px，
+ * 1024 宽时压 75px（这就是"球被对话卡盖住"的根因）。
+ */
+const ORB_INLINE_BELOW = 1240
+/** 2026-09-24 会客厅轮(S5): 环境辉光跟随球的状态色——3 米外不看字也知道它在听/在想/在说。
+ *  这是"最便宜的影院效应"：整面墙的光色就是状态指示器。 */
+const AMBIENT_ACCENT: Record<string, 'orange' | 'blue' | 'purple' | 'green' | 'pink'> = {
+  listening: 'green',
+  thinking: 'orange',
+  speaking: 'blue',
+  waiting: 'orange',
+}
+/** 球卡与对话卡之间的预留间隙：实测对话卡比公式宽约 16px（内层留白），
+ *  按 16 预留会变成"刚好贴住"，这里留 32 保证看得见空隙（2026-09-23 实测） */
+const ORB_CHAT_GAP = 32
+
+function orbAnchorX(innerWidth: number, cardW: number = ORB_CARD_W): number {
+  const chatW = Math.min(innerWidth * 0.3344, CHAT_CARD_MAX_W)
+  const chatLeft = innerWidth - 24 - chatW
+  const centered = innerWidth / 2 - cardW / 2
+  const rightOfLeftCol = SIMPLE_LEFT_X + SIMPLE_LEFT_W + SIMPLE_GAP
+  return Math.max(rightOfLeftCol, Math.min(centered, chatLeft - cardW - ORB_CHAT_GAP))
+}
+
+// 2026-09-23 一次性迁移: 旧锚点恒居中，在 <1300 宽时球卡必然与对话卡交叠（用户机上
+// 持久化下来的位置正是这种叠加态）。丢弃一次旧的球卡位置，让它落到新的避让锚点上；
+// 只丢一次（打标记），之后用户的拖动照旧持久化。
+try {
+  if (localStorage.getItem('voice-shell.layout.orb-anchor-v2') !== '1') {
+    localStorage.removeItem('voice-shell.card.orb')
+    localStorage.setItem('voice-shell.layout.orb-anchor-v2', '1')
+  }
+} catch { /* 隐私模式/存储不可用: 退回默认锚点即可 */ }
+
 export function VoiceShell() {
   // ── 2026-09-21 P2-1 第三批: 语音配置状态域搬至 ./useShellVoiceConfig（含加载/迁移/
   // 自愈/监听/派生/写入通道，行为逐字一致） ──
@@ -96,6 +150,20 @@ export function VoiceShell() {
   const [layoutMode, setLayoutMode] = useState<'simple' | 'advanced'>(() => {
     try { return localStorage.getItem('voice-shell.layout') === 'advanced' ? 'advanced' : 'simple' } catch { return 'simple' }
   })
+  // ── 2026-09-23 排版轮: 视口尺寸状态——左列竖排栈与球卡锚点都要按它计算；
+  //    窄窗时球块改为内联（见 chat-col），避免球卡压在对话卡上 ──
+  const [winSize, setWinSize] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  useEffect(() => {
+    let raf = 0
+    const onResize = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => setWinSize({ w: window.innerWidth, h: window.innerHeight }))
+    }
+    window.addEventListener('resize', onResize)
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', onResize) }
+  }, [])
+  // 2026-09-23: 清空对话是破坏性操作（且紧邻"收起对话"，两枚图标长得一样）——加确认框
+  const { confirmNode, askConfirm } = useConfirm()
   const [layoutResetNonce, setLayoutResetNonce] = useState(0)
   // 2026-08-31: 对话卡可收缩——默认缩起(小胶囊, 点击展开)；持久化
   const [chatCollapsed, setChatCollapsed] = useState<boolean>(() => {
@@ -103,6 +171,22 @@ export function VoiceShell() {
   })
   useEffect(() => { try { localStorage.setItem('voice-shell.chat.collapsed', chatCollapsed ? '1' : '0') } catch { /* 忽略 */ } }, [chatCollapsed])
   useEffect(() => { try { localStorage.setItem('voice-shell.layout', layoutMode) } catch { /* 忽略 */ } }, [layoutMode])
+
+  // ── 2026-09-22 体验层: 演示模式 ──
+  // 例会 / 圆桌会 / 投屏时，屏幕上现在是什么？左栏事件日志 + Memory/Decayed
+  // 计数 + 右下浮卡，投影出去很尴尬。此前全项目没有任何
+  // presentation/projection 模式（grep 零命中）。
+  // 实现为叠加在 layoutMode 之上的开关：不改 simple/advanced 语义，退出后原样恢复。
+  // 打开后隐藏两侧栏与浮卡（CSS 由 data-layout='present' 承担），放大结论与
+  // 决策卡（styles.css 的 present 段），只留议题与结论。
+  const [presentMode, setPresentMode] = useState<boolean>(() => {
+    try { return localStorage.getItem('voice-shell.present') === '1' } catch { return false }
+  })
+  useEffect(() => { try { localStorage.setItem('voice-shell.present', presentMode ? '1' : '0') } catch { /* 忽略 */ } }, [presentMode])
+  const togglePresentMode = useCallback(() => setPresentMode(v => !v), [])
+  // 供 [] 依赖的命令宿主读取当前值（闭包会陈旧）
+  const presentModeRef = useRef(presentMode)
+  presentModeRef.current = presentMode
   // chat 卡片拖动（simple 态）——位置持久化(与音乐卡同模式)
   const chatCardRef = useRef<HTMLDivElement>(null)
   const [chatDragOffset, setChatDragOffset] = useState<{ x: number; y: number } | null>(() => {
@@ -143,7 +227,7 @@ export function VoiceShell() {
   const [postSpeakUntil, setPostSpeakUntil] = useState<number | null>(null)
   const [dissolveSource, setDissolveSource] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const [postSpeakSegment, setPostSpeakSegment] = useState<string | null>(null)  // 停留窗口保留最后播报句
-  const prevOrbModeRef = useRef<'idle' | 'listening' | 'thinking' | 'speaking'>('idle')
+  const prevOrbModeRef = useRef<'idle' | 'listening' | 'thinking' | 'speaking' | 'waiting'>('idle')
   const captionRef = useRef<HTMLElement | null>(null)  // 消散采样源(字幕区已移除,恒 null 时静默跳过)
 
   // P7 Task 4: 阶段 TTS 阈值播报——每阈值(30/60/90)只播一次
@@ -333,26 +417,37 @@ export function VoiceShell() {
   // 2026-09-17: 实时通道——确认播报(面板开关/导航/模式提示/阶段播报)统一改喂
   // 实时模型口播(单一嗓子)。classic 豆包 TTS 队列在实时模式下不再出声,
   // 避免"关卡片是另一个声音"的双通道混音。
+  // 2026-09-22: 补 muted 门——旧实现直接改喂实时模型, 绕过了队列本身的静音守卫,
+  // 语音总开关关闭时确认播报(含新增的审批播报)仍会出声, 与 classic 通道行为不一致。
   const speech = useMemo(() => {
     if (dialogChannel !== 'realtime') return speechQueue
     return {
       ...speechQueue,
-      enqueue: (job: { id: string; text: string; kind?: string }) => {
+      enqueue: (job: { id: string; text: string; kind?: string; voice?: string }) => {
+        if (muted) return
         const w = window as any
         if (typeof w.__rtVoiceSpeak === 'function') w.__rtVoiceSpeak(job.text)
       },
     }
-  }, [speechQueue, dialogChannel])
+  }, [speechQueue, dialogChannel, muted])
   // P7 Task 4: 将 speech 实例写入 ref，供阶段播报回调使用（hooks 顺序约束：speech 在 flow 之后）
   speechRef.current = speech
 
   // 2026-08-17 R2-3: 全局播报事件（FileGenPanel done 自动重开时播报"文档已生成"）——
   // 复用 speechRef.enqueue（阶段播报同款通道，muted 时 enqueue 2min 自动过期丢弃）
+  // 2026-09-22: 这是「可播报事件层」（lib/notices 的 announce）的唯一消费方——
+  // 审批到达/超时、任务失败等原本只有视觉反馈的事，从此有统一出口说一句。
+  // 新增透传可选 voice：调用方可指定岗位音色（专家/角色播报），缺省落队列配置。
   useEffect(() => {
     const onSpeak = (ev: any) => {
       const d = ev?.detail
       if (d?.text) {
-        speechRef.current?.enqueue({ id: d.id || `speak_${Date.now()}`, text: d.text, kind: 'panel' })
+        speechRef.current?.enqueue({
+          id: d.id || `speak_${Date.now()}`,
+          text: d.text,
+          kind: 'panel',
+          ...(d.voice ? { voice: d.voice } : {}),
+        })
       }
     }
     window.addEventListener('crabpaw:speak', onSpeak)
@@ -382,11 +477,29 @@ export function VoiceShell() {
     return () => window.removeEventListener('crabpaw:voice-energy', onEnergy)
   }, [])
 
+  // ── 2026-08-19 三栏联动轮 P2: 待审批数(inline ApprovalHost 通知)——>0 时接管输入区 ──
+  // （声明位置提前到球态推导之前：deriveOrbMode 的"待批准"态要用它）
+  const [approvalPendingCount, setApprovalPendingCount] = useState(0)
+  // ── 2026-09-24: 实时通道"模型在说" → 球变蓝 ──
+  // 实时对话的声音来自双工 WS（模型自带嗓音），不走 TTS 队列，所以 ttsPlaying/isSpeaking
+  // 全为假 → 球会停在绿色（在听）而它其实在说。这是"空格对话与实时对话球色不一致"的
+  // 根因之一；状态由 useVoiceSession 统一广播（crabpaw:rt-speaking）。
+  const [rtSpeaking, setRtSpeaking] = useState(false)
+  useEffect(() => {
+    const onRtSpeaking = (e: Event) => {
+      const d = (e as CustomEvent<{ speaking?: boolean }>).detail
+      setRtSpeaking(d?.speaking === true)
+    }
+    window.addEventListener('crabpaw:rt-speaking', onRtSpeaking)
+    return () => window.removeEventListener('crabpaw:rt-speaking', onRtSpeaking)
+  }, [])
+
   // 由语音会话状态推导球体模式（2026-08-24 语义统一，纯函数见 lib/voice-orb-state）：
   //   关闭态(muted 语音总开关) → 静态白球(idle)
   //   语音开启态(唤醒/实时/PTT 任一策略或会话激活) → 绿(listening), 强弱由音量驱动
   //   发声 → 蓝(speaking, 优先级高于思考); LLM 处理 → 橙(thinking)
-  const orbMode = useMemo<'idle' | 'listening' | 'thinking' | 'speaking'>(() => {
+  //   待批准 → 琥珀慢脉冲(waiting, 2026-09-24 会客厅轮)
+  const orbMode = useMemo<'idle' | 'listening' | 'thinking' | 'speaking' | 'waiting'>(() => {
     return deriveOrbMode({
       muted,
       ttsPlaying: flow.ttsPlaying,
@@ -397,8 +510,12 @@ export function VoiceShell() {
       wakeArmed: shellConfig.wakeWordEnabled && !muted,
       continuousMode: shellConfig.continuousMode && !muted,
       pttOnly: shellConfig.pttOnly && !muted,
+      // 2026-09-24 会客厅轮(P5): 待批准 → 琥珀慢脉冲（余光可见"有东西等我"）
+      pendingApprovals: approvalPendingCount,
+      // 2026-09-24: 实时通道模型说话 → 蓝球（与 TTS 播报同义，修"两条通道球色不一致"）
+      rtSpeaking,
     })
-  }, [muted, flow.ttsPlaying, flow.isSpeaking, flow.pending, flow.voiceSessionActive, speech.isPlaying, shellConfig.wakeWordEnabled, shellConfig.continuousMode, shellConfig.pttOnly])
+  }, [muted, flow.ttsPlaying, flow.isSpeaking, flow.pending, flow.voiceSessionActive, speech.isPlaying, shellConfig.wakeWordEnabled, shellConfig.continuousMode, shellConfig.pttOnly, approvalPendingCount, rtSpeaking])
 
   // 2026-08-24: 绿态波动幅度 = 能量电平(listening 期取 ASR 采集侧, 待机取 KWS 侧;
   // 关闭态恒 0——白球完全静止)。电平只驱动幅度不切换 mode——旧实现把 active 当
@@ -415,9 +532,6 @@ export function VoiceShell() {
   // ── 2026-08-19 三栏联动轮: thinking 折叠(思维条长文本点击展开) ──
   const [thinkingExpanded, setThinkingExpanded] = useState(false)
   useEffect(() => { if (!flow.currentThinking) setThinkingExpanded(false) }, [flow.currentThinking])
-
-  // ── 2026-08-19 三栏联动轮 P2: 待审批数(inline ApprovalHost 通知)——>0 时接管输入区 ──
-  const [approvalPendingCount, setApprovalPendingCount] = useState(0)
 
   // ── B3(2026-09-05): agent 注意带——极简布局下执行层状态唯一常驻通道。
   // 输入与 orbMode 同口径(muted/策略门控一致), 增量仅 flow.toolEvents(running)
@@ -436,9 +550,11 @@ export function VoiceShell() {
       wakeArmed: shellConfig.wakeWordEnabled && !muted,
       continuousMode: shellConfig.continuousMode && !muted,
       pttOnly: shellConfig.pttOnly && !muted,
+      // 2026-09-24: 实时通道播报也要在注意带上显示"正在回复"（同样不走 TTS 队列）
+      rtSpeaking,
     })
   }, [approvalPendingCount, flow.toolEvents, flow.ttsPlaying, flow.isSpeaking, flow.pending,
-    flow.voiceSessionActive, speech.isPlaying, muted,
+    flow.voiceSessionActive, speech.isPlaying, muted, rtSpeaking,
     shellConfig.wakeWordEnabled, shellConfig.continuousMode, shellConfig.pttOnly])
   const focusRunningTool = useMemo(
     () => flow.toolEvents.filter(t => t.status === 'running').slice(-1)[0] ?? null,
@@ -842,6 +958,12 @@ export function VoiceShell() {
         setHistoryDrawerOpen(false)
         return
       }
+      // 2026-09-22 体验层: 演示模式是最外层状态——Esc 优先退出。
+      // 否则投屏时按 Esc 只会关掉一张场景卡，用户找不到出口。
+      if (e.key === 'Escape' && presentMode) {
+        setPresentMode(false)
+        return
+      }
       // 2026-08-12 (P2-8): 全局 ESC 关闭最上层场景卡（__sceneShell.closeTop，无卡时静默 no-op）。
       // 条件守卫避免抢其他浮层的 ESC：
       //  - 输入框/文本域聚焦时不拦截（输入场景的 ESC 用于取消/清空）
@@ -893,7 +1015,8 @@ export function VoiceShell() {
     return () => window.removeEventListener('keydown', onKey)
     // 2026-08-08(审计 P1): 补 historyDrawerOpen 依赖——旧闭包陈旧,打开历史抽屉后
     // 按 Esc 永远走不到抽屉分支,抽屉只能点 ✕ 关闭
-  }, [historyDrawerOpen, cockpitVisible])
+    // 2026-09-22: 补 presentMode 依赖——否则演示模式开启后 Esc 闭包仍是旧值,退不出
+  }, [historyDrawerOpen, cockpitVisible, presentMode])
 
   // ── Ctrl+K 命令面板全局接口 ──
   // __voiceShell.newConversation() —— 清空当前对话
@@ -919,6 +1042,39 @@ export function VoiceShell() {
     return () => { cancelled = true }
   }, [])
 
+  // ── 2026-09-24 会客厅轮(S1+S3): 一体机 / 会客厅形态 ──
+  // 球是唯一主角：会客厅态按屏高 45% 放大（clamp 320–560），工位态仍是 250；
+  // 卡片在墙上不该被拖走（拖了也没人教你拖回来），故关闭拖动。
+  // 两种来源：设备形态（--kiosk，界面内不可退出）+ 预览开关（顶栏一键，演示/验收用）。
+  // （声明必须在命令宿主注册之前：宿主暴露 setKiosk/toggleKiosk，读的就是这里的状态）
+  const kioskDevice = isKioskDevice()
+  const [kioskPreview, setKioskPreview] = useState(() => getKioskOverride())
+  const kiosk = kioskDevice || kioskPreview
+  const kioskRef = useRef(kiosk)
+  kioskRef.current = kiosk
+  // ── S3 待机主屏数据 ──
+  // 墙上 95% 时间在待机，而"酷"是在老板开口之前赢的：待机要像一台环境显示器
+  // （时间 + 一行大字要事），而不是一块空屏。要事来自晨报带（它已在轮询，回报摘要）。
+  const [briefingSummary, setBriefingSummary] = useState<{ hasData: boolean; count: number; suggestions: string[] }>(
+    { hasData: false, count: 0, suggestions: [] },
+  )
+  const [clockTick, setClockTick] = useState(() => Date.now())
+  useEffect(() => {
+    if (!kiosk) return
+    const t = setInterval(() => setClockTick(Date.now()), 30000)
+    return () => clearInterval(t)
+  }, [kiosk])
+  // ── S5 任务音效：开始执行（低音垫）/ 完成（确认音）──
+  // 只出声不发言——完成的语音播报由 lib/notices 负责，避免双声
+  const runningToolCount = flow.toolEvents.filter(r => r.status === 'running').length
+  const prevRunningRef = useRef(0)
+  useEffect(() => {
+    const prev = prevRunningRef.current
+    prevRunningRef.current = runningToolCount
+    if (runningToolCount > 0 && prev === 0) playSound('task-start')
+    else if (runningToolCount === 0 && prev > 0) playSound('task-done')
+  }, [runningToolCount])
+
   useEffect(() => {
     // A1: 经 ui-command-registry 注册(旧 window.__voiceShell 退役)
     const unregisterVoiceShell = registerCommandHost('voiceShell', {
@@ -926,9 +1082,32 @@ export function VoiceShell() {
         try { setConversation([]); conversationRef.current = [] } catch (err) { console.error('[shell] 命令面板清空对话失败:', err) }
         try { flowRef.current.newConversation() } catch (err) { console.error('[shell] 重置会话失败:', err) }
       },
+      // 2026-09-22 体验层: 演示模式——命令面板/语音共用此入口（工具栏按钮是第三个口）。
+      // setPresent 精确置位（"退出演示模式"不该在未开启时反而打开）；
+      // togglePresent 供命令面板的无参切换用。
+      setPresent: (v: boolean) => setPresentMode(!!v),
+      togglePresent: () => setPresentMode(v => !v),
+      isPresent: () => presentModeRef.current,
+      // 2026-09-24 会客厅轮(S3): 会客厅形态（命令面板 / 语音 / 顶栏按钮 三个口）。
+      // 设备形态（--kiosk）下不可退出——返回 false 让调用方播报"始终开启"。
+      setKiosk: (v: boolean) => {
+        if (kioskDevice) return false
+        setKioskOverride(!!v)
+        setKioskPreview(!!v)
+        return true
+      },
+      toggleKiosk: () => {
+        if (kioskDevice) return false
+        const next = !kioskRef.current
+        setKioskOverride(next)
+        setKioskPreview(next)
+        return true
+      },
+      isKiosk: () => kioskRef.current,
+      isKioskDevice: () => kioskDevice,
     })
     return () => { unregisterVoiceShell() }
-  }, [])
+  }, [kioskDevice])
 
   // crabpaw:open-cockpit —— ManagementCockpit.__cockpit.open(tab) 与 voiceCommands 导航命令
   // 经 custom event 通知 VoiceShell。2026-08-12 (P1 缺陷 1): 补语音导航映射——
@@ -1354,15 +1533,55 @@ export function VoiceShell() {
     setAttachments(prev => prev.filter(a => a.pending))
   }, [textInput, attachments, handleUserInput])
 
+  // ── 2026-09-24 会客厅轮(S2): 空的内容一律不占位 ──
+  // 屏幕最贵的左上角不该用来汇报"一切正常"。账本卡只在真的有事时出现（空态
+  // "现在没有要办的事"本身占着版面却不含信息）；一体机态连心跳/日志遥测也不显示。
+  // 硬约束不变：有待办/审批时账本必须出现——"审批不漏"不能因界面收敛而回退。
+  // （声明必须在几何计算之前：ledgerBodyH 依赖 hasNotices）
+  const notices = useSyncExternalStore(subscribeNotices, getNotices)
+  const hasNotices = notices.length > 0
+  // ── 2026-09-23 排版轮: 极简布局左列竖排栈（按窗口高度分配，矮窗口自动压缩账本体）──
+  const leftTopY = 88
+  // 账本体高度：有内容才展开——空账本只有一行"现在没有要办的事"，若仍按满高
+  // 300 算锚点，就会在它和心跳卡之间留出 170+px 空洞（实测）
+  const ledgerBodyH = hasNotices ? Math.max(120, Math.min(300, winSize.h - 430)) : 120
+  // 58 = 账本卡外壳（标题栏+内边距，实测 +50）再加 8 间距
+  const heartbeatY = leftTopY + ledgerBodyH + 58
+  // 274 = 实测心跳卡高 260（状态点由 emoji 改圆点后 +13）+ 14 间距
+  const sysinfoY = heartbeatY + 274
+  // ── 2026-09-24 会客厅轮(S2): 一体机上不显示心跳/日志遥测（墙上没人看遥测）──
+  const orbSize = kiosk ? Math.round(Math.max(320, Math.min(560, winSize.h * 0.45))) : 250
+  const orbCardW = kiosk ? orbSize + 40 : ORB_CARD_W
+  // 轻点球 = 开始听 / 打断播报（沿用唤醒命中的"万能打断"路径：停 TTS + 起会话）
+  const tapTalk = useCallback(() => {
+    try {
+      const w = window as unknown as { __voiceWakeHit?: () => void }
+      if (typeof w.__voiceWakeHit === 'function') w.__voiceWakeHit()
+    } catch (e) { console.warn('[shell] 轻点球开始听失败:', e) }
+  }, [])
+  /** 视口太窄时球块内联到对话卡上方（球卡 + 左列 + 对话卡放不下）。
+   *  仅极简布局：高级布局的球本来就在左栏顶部，内联会多出一个球。 */
+  const orbInline = layoutMode === 'simple' && winSize.w < ORB_INLINE_BELOW
+
   return (
-    <div className="voice-shell" data-layout={layoutMode} data-chat-collapsed={layoutMode === 'simple' && chatCollapsed ? 'true' : undefined} data-hotspot-open={hotspotPanelOpen ? 'true' : undefined}>
-      <AmbientGlow intensity={orbMode === 'listening' ? 1.4 : 1} accent="purple" idle={orbMode === 'idle'} />
+    <div className="voice-shell" data-layout={presentMode ? 'present' : layoutMode} data-kiosk={kiosk ? 'true' : undefined} data-chat-collapsed={!presentMode && layoutMode === 'simple' && chatCollapsed ? 'true' : undefined} data-hotspot-open={hotspotPanelOpen ? 'true' : undefined}>
+      <AmbientGlow
+        intensity={
+          orbMode === 'listening' ? 1.4
+            : orbMode === 'speaking' ? 1.1 + Math.min(0.5, orbVolume)
+              : orbMode === 'thinking' ? 1.25
+                : 1
+        }
+        accent={AMBIENT_ACCENT[orbMode] ?? 'purple'}
+        idle={orbMode === 'idle'}
+      />
 
       <TaskOrbit />
 
       <header className="voice-shell-header">
+        {/* 2026-09-24 会客厅轮: 品牌头去 emoji（🦀）——emoji 会把"专业仪器"拉成"手机 App"。
+            暂时只留纯字标（更克制、更像仪器铭牌）；等你给出 logo 图再换成图形标。 */}
         <div className="voice-shell-brand">
-          <span className="voice-shell-brand-crab">🦀</span>
           CrabPaw
         </div>
 
@@ -1377,7 +1596,9 @@ export function VoiceShell() {
                 onClick={() => setExpandedHistory(expandedHistory === idx ? null : idx)}
                 title={item.summary}
               >
-                <span className="holo-history-kind">{item.kind === 'weather' ? '☀' : item.kind === 'speak' ? '📣' : '●'}</span>
+                <span className="holo-history-kind" aria-hidden>
+                  {item.kind === 'weather' ? <Sun size={12} /> : item.kind === 'speak' ? <Megaphone size={12} /> : <span className="holo-history-dot" />}
+                </span>
                 <span className="holo-history-summary">{item.summary.slice(0, 16)}{item.summary.length > 16 ? '…' : ''}</span>
                 {expandedHistory === idx && (
                   <div className="holo-history-card" onClick={(e) => e.stopPropagation()}>
@@ -1393,53 +1614,91 @@ export function VoiceShell() {
         <div className="voice-shell-header-right">
           {/* 2026-08-15 用户反馈: "全效"按钮无用已移除——性能模式库保持默认全效,
               如需降级可在管理舱设置(performance-mode lib 仍被 SceneShell 消费) */}
-          {/* 2026-08-31 M3: 布局切换——⭐高级=恢复三栏(诊断/事件日志/工具执行可见) */}
-          <button
-            type="button"
-            className={`voice-shell-console-btn${layoutMode === 'advanced' ? ' is-active' : ''}`}
-            onClick={() => setLayoutMode(m => (m === 'advanced' ? 'simple' : 'advanced'))}
-            title={layoutMode === 'advanced' ? '回到极简卡片布局' : '高级面板（事件日志/工具执行/服务详情）'}
-          >
-            <Columns size={13} />
-          </button>
-          {/* 2026-08-31 M3: 极简态下恢复默认卡片布局 */}
-          {layoutMode === 'simple' && (
+          {/* 2026-09-24 会客厅轮(S3): 顶栏按语义分三组（形态 / 布局 / 面板），组间竖线分隔。
+              此前五个 13px 图标平铺成一排，没有分组也没有标签，误点代价还高（演示/形态切换）。 */}
+          <div className="voice-shell-header-group">
+            {/* 会客厅模式：墙上形态（大球/收起遥测/隐藏经营明细）。设备形态下不显示
+                ——一体机不该有"退出自己"的按钮 */}
+            {!kioskDevice && (
+              <button
+                type="button"
+                className={`voice-shell-console-btn${kiosk ? ' is-active' : ''}`}
+                onClick={() => { setKioskOverride(!kiosk); setKioskPreview(!kiosk) }}
+                title={kiosk ? '退出会客厅模式' : '会客厅模式——站在墙上的形态：大球、收起遥测、隐藏经营明细'}
+                aria-label={kiosk ? '退出会客厅模式' : '会客厅模式'}
+                aria-pressed={kiosk}
+              >
+                <Tv size={13} aria-hidden />
+              </button>
+            )}
+            {/* 2026-09-22 体验层: 演示模式——例会/圆桌/投屏时把界面收成"只给结论"。
+                隐藏两侧栏与遥测浮卡、放大结论与决策卡；退出后原布局原样恢复。 */}
+            <button
+              type="button"
+              className={`voice-shell-console-btn${presentMode ? ' is-active' : ''}`}
+              onClick={togglePresentMode}
+              title={presentMode ? '退出演示模式（Esc）' : '演示模式——投屏/例会时只留议题与结论'}
+              aria-label={presentMode ? '退出演示模式' : '演示模式'}
+              aria-pressed={presentMode}
+            >
+              <Presentation size={13} aria-hidden />
+            </button>
+          </div>
+          <div className="voice-shell-header-group">
+            {/* 2026-08-31 M3: 布局切换——⭐高级=恢复三栏(诊断/事件日志/工具执行可见) */}
+            <button
+              type="button"
+              className={`voice-shell-console-btn${layoutMode === 'advanced' ? ' is-active' : ''}`}
+              onClick={() => setLayoutMode(m => (m === 'advanced' ? 'simple' : 'advanced'))}
+              title={layoutMode === 'advanced' ? '回到极简卡片布局' : '高级面板（事件日志/工具执行/服务详情）'}
+              aria-label="布局切换"
+            >
+              <Columns size={13} aria-hidden />
+            </button>
+            {/* 2026-08-31 M3: 极简态下恢复默认卡片布局 */}
+            {layoutMode === 'simple' && (
+              <button
+                type="button"
+                className="voice-shell-console-btn"
+                onClick={() => setLayoutResetNonce(n => n + 1)}
+                title="恢复默认布局（卡片位置归位）"
+                aria-label="恢复默认布局"
+              >
+                <RotateCcw size={13} aria-hidden />
+              </button>
+            )}
+          </div>
+          <div className="voice-shell-header-group">
             <button
               type="button"
               className="voice-shell-console-btn"
-              onClick={() => setLayoutResetNonce(n => n + 1)}
-              title="恢复默认布局"
+              onClick={() => {
+                // A2: 管理舱由 sheet-state 互斥自动收起(overlay 顶掉)
+                setHistoryDrawerOpen(true)
+              }}
+              title="历史会话"
+              aria-label="历史会话"
             >
-              <RotateCcw size={13} />
+              <History size={13} aria-hidden />
             </button>
-          )}
-          {/* 阶段 B: 管理舱按钮——「打开管理舱」即停靠总览（overview）；「系统管理」语义不变，
-              设置/插件/技能/用量等 tab 仍在舱内可达（2026-08-12 移除独立 ⚙ 配置按钮） */}
-          <button
-            type="button"
-            className={`voice-shell-console-btn${cockpitVisible ? ' is-active' : ''}`}
-            onClick={() => {
-              // A2: 历史抽屉由 sheet-state 互斥自动收起(overlay 顶掉)
-              setCockpitTab('overview')
-              setCockpitNavSection(null)
-              setCockpitDebugTab('logs')
-              setCockpitVisible(true)
-            }}
-            title="系统管理（设置/插件/技能/用量）"
-          >
-            <LayoutDashboard size={13} />
-          </button>
-          <button
-            type="button"
-            className="voice-shell-console-btn"
-            onClick={() => {
-              // A2: 管理舱由 sheet-state 互斥自动收起(overlay 顶掉)
-              setHistoryDrawerOpen(true)
-            }}
-            title="历史会话"
-          >
-            <History size={13} />
-          </button>
+            {/* 阶段 B: 管理舱按钮——「打开管理舱」即停靠总览（overview）；「系统管理」语义不变，
+                设置/插件/技能/用量等 tab 仍在舱内可达（2026-08-12 移除独立 ⚙ 配置按钮） */}
+            <button
+              type="button"
+              className={`voice-shell-console-btn${cockpitVisible ? ' is-active' : ''}`}
+              onClick={() => {
+                // A2: 历史抽屉由 sheet-state 互斥自动收起(overlay 顶掉)
+                setCockpitTab('overview')
+                setCockpitNavSection(null)
+                setCockpitDebugTab('logs')
+                setCockpitVisible(true)
+              }}
+              title="系统管理（设置/插件/技能/用量）"
+              aria-label="系统管理"
+            >
+              <LayoutDashboard size={13} aria-hidden />
+            </button>
+          </div>
           {/* 2026-08-14 T-1: frameless 窗口控制（最小化/最大化/关闭）
               —— DingDong TitleBar 同款, preload electronAPI.window.* */}
           <div className="voice-shell-win-btns">
@@ -1458,7 +1717,7 @@ export function VoiceShell() {
 
       {/* 三栏布局：左栏(消息处理器) | 中栏(对话) | 右栏(监控面板) */}
       <div className="voice-shell-layout">
-        {/* 左栏：用户消息处理器 */}
+        {/* 左栏：工作台（要办的事 / 运行日志 双页签） */}
         <aside className="voice-shell-sidebar voice-shell-sidebar--left">
           <AgentLeftPanel
             compact={hotspotPanelOpen}
@@ -1630,25 +1889,26 @@ export function VoiceShell() {
         {/* 2026-08-15 用户反馈: 组合布局(热点/台风/股票)下语音球区块移到对话
             窗口上方——左栏完全让位, 页面不再因左栏残留 200px 而变形挤压。
             compact 横向小尺寸(96px 球)。 */}
-        {hotspotPanelOpen && (
+        {(hotspotPanelOpen || orbInline) && (
           <div className="voice-shell-orb-top-inline">
-            <OrbTopBlock
-              orbMode={orbMode}
-              muted={muted}
-              volume={orbVolume}
-              speechRate={speechRate}
-              micMode={micMode}
-              compact
-              onToggleMute={toggleMute}
-              onSpeechRate={setSpeechRateLevel}
-              onCycleMicMode={cycleMicMode}
-            />
+              <OrbTopBlock
+                orbMode={orbMode}
+                muted={muted}
+                volume={orbVolume}
+                speechRate={speechRate}
+                micMode={micMode}
+                compact
+                onToggleMute={toggleMute}
+                onSpeechRate={setSpeechRateLevel}
+                onCycleMicMode={cycleMicMode}
+                onTapTalk={tapTalk}
+              />
           </div>
         )}
 
         {/* 顶部栏：标题 + 清空按钮 */}
         <div className="voice-shell-chat-topbar">
-          <span className="voice-shell-chat-title">💬</span>
+          <span className="voice-shell-chat-title"><MessageSquare size={14} aria-hidden /></span>
           {/* B3: agent 注意带——极简布局下"在干什么/等什么"常驻可见 */}
           <FocusRibbon
             state={focusState}
@@ -1659,11 +1919,21 @@ export function VoiceShell() {
           <button
             type="button"
             className="voice-shell-chat-clear-btn"
-            onClick={() => {
+            onClick={async () => {
+              // 2026-09-23 排版轮: 这是首页唯一的破坏性按钮，且紧邻"收起对话"
+              // （同样 13px 图标、同样样式），误点即毁掉整段对话——补确认框
+              const ok = await askConfirm({
+                title: '清空对话',
+                message: '会清空当前对话记录并开始新会话，此操作不可撤销。',
+                confirmLabel: '清空',
+                danger: true,
+              })
+              if (!ok) return
               try { setConversation([]); conversationRef.current = [] } catch (err) { console.error('[shell] 清空对话失败:', err) }
               try { flowRef.current.newConversation() } catch (err) { console.error('[shell] 重置会话失败:', err) }
             }}
             title="清空对话"
+            aria-label="清空对话"
           >
             <Brush size={13} />
           </button>
@@ -1683,12 +1953,24 @@ export function VoiceShell() {
         <div className="voice-shell-chat-area">
           {/* 2026-09-21 晨报带——零输入信息层: 日程/应收逾期/临期合同/本月营收,
               数据全无时整条隐藏; 点击指标块经 handleCommandChip 直发追问 */}
-          <MorningBriefingStrip onAsk={handleCommandChip} />
+          <MorningBriefingStrip onAsk={handleCommandChip} onSummary={setBriefingSummary} maskPrivate={kiosk} />
+          {/* S4 高光时刻（会客厅）：把"正在执行"放大成一行大字——客人要看得懂在干什么。
+              工位态不显示（那里右栏工具过程 + 流内工具卡信息不丢） */}
+          {kiosk && focusRunningTool?.toolName && (
+            <div className="voice-shell-exec-narrative" role="status" aria-live="polite">
+              <Loader2 size={18} className="voice-shell-exec-spin" aria-hidden />
+              正在执行 · {focusRunningTool.toolName}
+              {flow.toolEvents.filter(r => r.status === 'running').length > 1
+                ? `（并行 ${flow.toolEvents.filter(r => r.status === 'running').length} 项）`
+                : ''}
+            </div>
+          )}
           {conversation.length === 0 ? (
             <ChatEmptyState
               pttOnly={shellConfig.pttOnly}
               continuousMode={shellConfig.continuousMode}
               onAsk={handleCommandChip}
+              liveSuggestions={briefingSummary.suggestions}
             />
           ) : (
             <div className="voice-shell-chat-messages" ref={chatMessagesRef} onScroll={handleChatScroll}>
@@ -1720,8 +2002,9 @@ export function VoiceShell() {
               <StreamingBubble agentDisplayName={agentDisplayName} text={streamingAiText} />
               <RtTypingIndicator running={roundtable.running} typing={roundtable.typing} />
               {/* 2026-08-14(DingDong CardStream 对齐): 工具结果卡片流——内嵌聊天流,
-                  四态生命周期(running→done/fail→2.5s 淡出), 与右栏过程卡双轨并存 */}
-              <ToolCardStream runs={flow.toolEvents} />
+                  四态生命周期(running→done/fail→2.5s 淡出), 与右栏过程卡双轨并存
+                  S4: 会客厅态收起（10px 工具细流是给操作者看的，客人只看上面那行大字）*/}
+              {!kiosk && <ToolCardStream runs={flow.toolEvents} />}
             </div>
           )}
           {/* 2026-08-14 ag-ui 二次分析: 回底浮动按钮——离开底部才出现
@@ -1742,6 +2025,13 @@ export function VoiceShell() {
           roundtableRunning={roundtable.running}
           roundtableGoal={roundtable.goal || ''}
           roundtableMuted={roundtable.muted}
+          /* 2026-09-22 体验层: 会议进度可见（阶段 + 已发言/到场人数） */
+          roundtablePhaseLabel={rtPhaseLabel(roundtable.phase)}
+          roundtableSpoken={roundtable.spokenCount}
+          roundtableTotal={roundtable.roster.length}
+          /* 2026-09-23: 中止能力（后端 cancelRoundtable + 已发言保留语义） */
+          roundtableCancelling={roundtable.cancelling}
+          onCancelRoundtable={() => { roundtable.cancel().catch(e => console.warn('[shell] 中止圆桌会失败:', e)) }}
           onToggleRoundtableMuted={roundtable.toggleMuted}
           approvalPendingCount={approvalPendingCount}
           onApprovalActiveChange={setApprovalPendingCount}
@@ -1787,14 +2077,37 @@ export function VoiceShell() {
         </aside>
       </div>
 
-      {/* 2026-08-31 M3: 极简三卡片 —— 心跳(左) / 语音球(中) / 对话窗(右, 见 chat-col) */}
-      {layoutMode === 'simple' && (
+      {/* 2026-08-31 M3: 极简三卡片 —— 左列 / 语音球(中) / 对话窗(右, 见 chat-col)
+          2026-09-22: 演示模式下整体不渲染——投屏时不该出现遥测浮卡
+          2026-09-23 排版轮:
+            ①左列第一位从"心跳遥测"换成「要办的事」账本（与高级布局同一个 TaskLedger
+              组件）——老板第一眼该看到"我要办什么"，而不是"服务在不在线"；
+            ②左列改成按窗口高度算的竖排栈：矮窗口下压缩账本体高度，三张卡都留在视口内；
+            ③球卡锚点避让左列与对话卡（orbAnchorX），视口窄于 1240 时整块内联到对话卡上方 */}
+      {layoutMode === 'simple' && !presentMode && (
         <>
+          {/* S2: 账本只在真有事时出现（工位态照旧；一体机态没内容就不占位）*/}
+          {(!kiosk || hasNotices) && (
+          <ShellFloatCard
+            cardKey="ledger"
+            title={<><ListChecks size={13} aria-hidden /> 要办的事</>}
+            width={SIMPLE_LEFT_W}
+            defaultOffset={{ x: SIMPLE_LEFT_X, y: leftTopY }}
+            resetNonce={layoutResetNonce}
+            blur="sm"
+          >
+            <div style={{ maxHeight: ledgerBodyH, display: 'flex', flexDirection: 'column' }}>
+              <TaskLedger onSpeakHint={(t) => announce(t, { kind: 'approval' })} maskDetail={kiosk} />
+            </div>
+          </ShellFloatCard>
+          )}
+          {/* S2: 一体机态不显示心跳遥测（墙上没人看；工位态保留当诊断）*/}
+          {!kiosk && (
           <ShellFloatCard
             cardKey="heartbeat"
-            title="◉ 心跳"
-            width={264}
-            defaultOffset={{ x: 24, y: 120 }}
+            title={<><Activity size={13} aria-hidden /> 心跳</>}
+            width={SIMPLE_LEFT_W}
+            defaultOffset={{ x: SIMPLE_LEFT_X, y: heartbeatY }}
             resetNonce={layoutResetNonce}
             blur="sm"
           >
@@ -1807,12 +2120,13 @@ export function VoiceShell() {
               speaking={orbMode === 'speaking'}
             />
           </ShellFloatCard>
+          )}
           {layoutMode === 'simple' && chatCollapsed && (
             <ShellFloatCard
               cardKey="chat-mini"
-              title="💬 对话"
-              width={264}
-              defaultOffset={{ x: Math.max(8, window.innerWidth - 304), y: 96 }}
+              title={<><MessageSquare size={13} aria-hidden /> 对话</>}
+              width={SIMPLE_LEFT_W}
+              defaultOffset={{ x: Math.max(8, winSize.w - SIMPLE_LEFT_W - 40), y: 96 }}
               resetNonce={layoutResetNonce}
               blur="sm"
               dragOnButtons
@@ -1826,43 +2140,68 @@ export function VoiceShell() {
                 >
                   ⤢ 展开对话
                 </button>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>按住空格说话</span>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>
+                  {kiosk ? '按住语音球说话' : '按住空格说话'}
+                </span>
               </div>
             </ShellFloatCard>
           )}
-          {layoutMode === 'simple' && (
+          {/* S2: 一体机态不显示运行日志（遥测不上墙）*/}
+          {!kiosk && layoutMode === 'simple' && (
             <SysInfoCard
               logs={monitor.logs}
               toolRuns={flow.toolEvents}
               activeToolCount={flow.toolEvents.filter(r => r.status === 'running').length}
               resetNonce={layoutResetNonce}
+              defaultOffsetOverride={{ x: SIMPLE_LEFT_X, y: sysinfoY }}
             />
           )}
-          <ShellFloatCard
-            cardKey="orb"
-            domId={ORB_FLOAT_DOM_ID}
-            title="◉ 语音"
-            bare
-            width={442}
-            defaultOffset={{ x: Math.max(8, (window.innerWidth / 2) - 221), y: 110 }}
-            resetNonce={layoutResetNonce}
-            blur="sm"
-            dragOnButtons
-          >
-            <div style={{ padding: '6px 0 4px' }}>
-              <OrbTopBlock
-                orbMode={orbMode}
-                muted={muted}
-                volume={orbVolume}
-                speechRate={speechRate}
-                micMode={micMode}
-                size={250}
-                onToggleMute={toggleMute}
-                onSpeechRate={setSpeechRateLevel}
-                onCycleMicMode={cycleMicMode}
-              />
-            </div>
-          </ShellFloatCard>
+          {/* 视口够宽才用浮动球卡；窄窗改内联（见 chat-col 的 orb-top-inline），
+              否则 442 宽的球卡必然压在对话卡上 */}
+          {!orbInline && (
+            <ShellFloatCard
+              cardKey="orb"
+              domId={ORB_FLOAT_DOM_ID}
+              title={<><AudioLines size={13} aria-hidden /> 语音</>}
+              bare
+              width={orbCardW}
+              defaultOffset={{ x: orbAnchorX(winSize.w, orbCardW), y: 110 }}
+              resetNonce={layoutResetNonce}
+              blur="sm"
+              dragOnButtons
+              draggable={!kiosk}
+            >
+              <div style={{ padding: '6px 0 4px' }}>
+                <OrbTopBlock
+                  orbMode={orbMode}
+                  muted={muted}
+                  volume={orbVolume}
+                  speechRate={speechRate}
+                  micMode={micMode}
+                  size={orbSize}
+                  onToggleMute={toggleMute}
+                  onSpeechRate={setSpeechRateLevel}
+                  onCycleMicMode={cycleMicMode}
+                  onTapTalk={tapTalk}
+                />
+              </div>
+              {/* S3 待机主屏：时间 + 一行大字要事（墙上看 1–2m；不拦截指针） */}
+              {kiosk && (
+                <div className="voice-shell-standby">
+                  <div className="voice-shell-standby-time">
+                    {new Date(clockTick).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                  <div className="voice-shell-standby-line">
+                    {approvalPendingCount > 0
+                      ? <>有 <strong>{approvalPendingCount}</strong> 件事等你拍板</>
+                      : briefingSummary.count > 0
+                        ? <>今天 <strong>{briefingSummary.count}</strong> 件事，问我就行</>
+                        : <>说一句话，或按住语音球</>}
+                  </div>
+                </div>
+              )}
+            </ShellFloatCard>
+          )}
         </>
       )}
 
@@ -1924,6 +2263,9 @@ export function VoiceShell() {
 
       {/* Ctrl+K 全局命令面板 */}
       <CommandPalette />
+
+      {/* 2026-09-23: 破坏性操作的确认框（清空对话）——挂在本组件末尾 */}
+      {confirmNode}
 
       {/* P6(GUI 全量修复 P1): 协作轨道恢复挂载(共享播报队列, 空轨道自隐藏) */}
       <CollabOrbit speechQueue={speech} />

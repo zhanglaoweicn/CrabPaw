@@ -15,7 +15,7 @@
  * 能量电平只驱动音量（见调用方 volume 推导），不再直接切换 mode。
  */
 
-export type VoiceOrbMode = 'idle' | 'listening' | 'thinking' | 'speaking'
+export type VoiceOrbMode = 'idle' | 'listening' | 'thinking' | 'speaking' | 'waiting'
 
 export interface OrbStateInput {
   /** 语音总开关（点球切换）：关闭时 ASR/KWS/TTS/PTT 全停，球为静态白 */
@@ -32,13 +32,22 @@ export interface OrbStateInput {
   wakeArmed: boolean
   continuousMode: boolean
   pttOnly: boolean
+  /** 2026-09-24 会客厅轮(P5): 待审批数——>0 即"有东西等老板出手"。这是唯一需要
+   *  用户行动的状态，此前只在对话卡注意带里体现，球上毫无提示（余光看不到）。 */
+  pendingApprovals?: number
+  /** 2026-09-24: 实时通道"模型正在说话"——实时对话不走 TTS 队列（模型自带嗓音，
+   *  声音来自双工 WS），所以 ttsPlaying/isSpeaking/queuePlaying 全为假 → 球会停在
+   *  绿色（在听），而它其实在说。这是"空格对话 vs 实时对话球色不一致"的根因之一。 */
+  rtSpeaking?: boolean
 }
 
 export function deriveOrbMode(i: OrbStateInput): VoiceOrbMode {
   // 关闭态：一律静态白（与旧 muted→蓝灰 不同——用户要求「不启用 asr/tts = 白色静态球」）
   if (i.muted) return 'idle'
-  // 发声（TTS）→ 蓝；优先级高于 pending（播报本身也是处理中，语音优先）
-  if (i.ttsPlaying || i.isSpeaking || i.queuePlaying) return 'speaking'
+  // 待批准 → 琥珀慢脉冲（优先级仅次于静音：需要人出手的事压过一切"进行中"）
+  if ((i.pendingApprovals ?? 0) > 0) return 'waiting'
+  // 发声（TTS 或实时通道模型说话）→ 蓝；优先级高于 pending（播报本身也是处理中，语音优先）
+  if (i.ttsPlaying || i.isSpeaking || i.queuePlaying || i.rtSpeaking) return 'speaking'
   // 思考 → 橙
   if (i.pending) return 'thinking'
   // 语音开启态（任一策略或会话激活）→ 绿；安静/有声的强弱由 volume 驱动（调用方传入）
@@ -83,6 +92,8 @@ export interface AgentFocusInput {
   wakeArmed: boolean
   continuousMode: boolean
   pttOnly: boolean
+  /** 2026-09-24: 实时通道"模型在说"（同上，注意带也要认） */
+  rtSpeaking?: boolean
 }
 
 export function deriveAgentFocus(i: AgentFocusInput): AgentFocusState {
@@ -90,7 +101,7 @@ export function deriveAgentFocus(i: AgentFocusInput): AgentFocusState {
   if (i.pendingApprovals > 0) return 'waiting'
   // 工具执行中——即使语音关闭(muted)也要显示: 工作在跑, 盲飞感来自这里
   if (i.toolRunning > 0) return 'acting'
-  if (i.ttsPlaying || i.isSpeaking || i.queuePlaying) return 'speaking'
+  if (i.ttsPlaying || i.isSpeaking || i.queuePlaying || i.rtSpeaking) return 'speaking'
   if (i.pending) return 'thinking'
   if (i.muted) return 'idle'
   if (i.voiceSessionActive || i.wakeArmed || i.continuousMode || i.pttOnly) return 'listening'

@@ -668,8 +668,9 @@ export function FileGenPanel() {
     })
   }, [handleClose, setVisible, visible])
 
+  // 2026-09-19: 宽度对齐台风/热点面板统一 70vw——去掉 1080px 上限, 宽屏上不再比台风/热点窄
   return (
-    <SideSheet open={visible} onClose={handleClose} name="filegen" width="clamp(520px, 70vw, 1080px)">
+    <SideSheet open={visible} onClose={handleClose} name="filegen" width="70vw">
       <div className="filegen-panel">
         {/* 标题栏（语音开关随 SideSheet 统一渲染——全面板语音开关，2026-08-15 轮已实现） */}
         <div className="filegen-header">

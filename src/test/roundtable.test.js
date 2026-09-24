@@ -210,3 +210,79 @@ describe('整场编排（fake runner）', () => {
     expect(rt.interveneRoundtable(r.meetingId, '晚了一步').ok).toBe(false);
   }, 15000);
 });
+
+describe('中止会议（2026-09-23）', () => {
+  test('中止后不再有新发言，已产生的保留，且不落 error 口径', async () => {
+    const prompts = [];
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    let gated = false;
+
+    const runner = async (taskDefs) => {
+      const results = [];
+      for (const def of taskDefs) {
+        prompts.push(def.goal);
+        // 第 3 条发言处设闸：模拟"某位专家正在说话时老板按了中止"
+        if (prompts.length === 3 && !gated) { gated = true; await gate; }
+        results.push({ status: 'completed', result: `第${prompts.length}条观点` });
+      }
+      return results;
+    };
+
+    const started = await rt.startRoundtable({ goal: '中止测试会', sessionId: 'jest-cancel' }, { runner });
+    await waitFor(() => prompts.length >= 3);
+
+    // 中止受理，且幂等（连点不重复置位）
+    expect(rt.cancelRoundtable(started.meetingId).ok).toBe(true);
+    const again = rt.cancelRoundtable(started.meetingId);
+    expect(again.ok).toBe(true);
+    expect(again.alreadyRequested).toBe(true);
+
+    release();
+    await waitFor(() => rt.getRoundtable(started.meetingId).phase === 'cancelled');
+    const final = rt.getRoundtable(started.meetingId);
+
+    // 核心语义：不删已说过的，只让后面的人不再开口
+    expect(final.phase).toBe('cancelled');
+    expect(final.statements).toHaveLength(3);
+    expect(final.statements.every((s) => s.round === 1)).toBe(true);
+    expect(prompts).toHaveLength(3);          // 第 4 位起未发起
+    // 中止不是失败：不落 error、不产结论/纪要
+    expect(final.error).toBeNull();
+    expect(final.conclusion).toBeNull();
+    expect(final.document).toBeNull();
+    expect(final.cancelRequested).toBe(true);
+  }, 20000);
+
+  test('中止即终态——单例闸解除，可立刻再开一场', async () => {
+    const a = await rt.startRoundtable({ goal: '待中止会' }, {
+      runner: async (defs) => { await new Promise((r) => setTimeout(r, 5)); return defs.map(() => ({ status: 'completed', result: '观点' })); },
+    });
+    // 刚开就中止：一位都没开口也应被受理（不应要求"至少说过一句"）
+    expect(rt.cancelRoundtable(a.meetingId).ok).toBe(true);
+    await waitFor(() => rt.getRoundtable(a.meetingId).phase === 'cancelled');
+    const running = rt.findRunning();
+    expect(running === null || running.meetingId !== a.meetingId).toBe(true);
+
+    const b = await rt.startRoundtable({ goal: '中止后的新会' }, {
+      runner: async (defs) => defs.map(() => ({ status: 'completed', result: '## 会议结论\n无分歧。\n## 任务清单\n无' })),
+    });
+    expect(b.alreadyRunning).toBeUndefined();
+    expect(b.meetingId).not.toBe(a.meetingId);
+    await waitFor(() => ['done', 'error'].includes(rt.getRoundtable(b.meetingId).phase));
+  }, 20000);
+
+  test('已结束的会议拒绝中止；不存在的会议报 not_found', async () => {
+    const r = await rt.startRoundtable({ goal: '结束态会' }, {
+      runner: async (defs) => defs.map(() => ({ status: 'completed', result: '## 会议结论\n无。\n## 任务清单\n无' })),
+    });
+    await waitFor(() => ['done', 'error'].includes(rt.getRoundtable(r.meetingId).phase));
+    const ended = rt.cancelRoundtable(r.meetingId);
+    expect(ended.ok).toBe(false);
+    expect(ended.reason).toBe('meeting_ended');
+
+    const missing = rt.cancelRoundtable('rt_不存在的会议');
+    expect(missing.ok).toBe(false);
+    expect(missing.reason).toBe('not_found');
+  }, 20000);
+});

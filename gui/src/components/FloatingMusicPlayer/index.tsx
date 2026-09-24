@@ -109,19 +109,9 @@ export function FloatingMusicPlayer({ visible, onClose, initialQuery, queryNonce
   const [currentLyricIndex, setCurrentLyricIndex] = useState(-1)
   const [showLyrics, setShowLyrics] = useState(false)
   const [selfVisible, setSelfVisible] = useState(false)  // 自管理的可见性
-  // 2026-08-15: 可拖动位置（SideSheet draggable）——localStorage 持久化, 刷新后恢复
-  const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null)
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('crabpaw.music.dragOffset')
-      if (raw) setDragOffset(JSON.parse(raw))
-    } catch (e) { console.warn('[FMP] 读取拖拽位置失败:', e instanceof Error ? e.message : e) }
-  }, [])
-  useEffect(() => {
-    try {
-      if (dragOffset) localStorage.setItem('crabpaw.music.dragOffset', JSON.stringify(dragOffset))
-    } catch (e) { console.warn('[FMP] 保存拖拽位置失败:', e instanceof Error ? e.message : e) }
-  }, [dragOffset])
+  // 2026-09-19: 高度对齐台风/热点面板（默认全高）——移除 fitContent 与可拖拽组。
+  // SideSheet draggable 不再启用, 历史残留的 crabpaw.music.dragOffset localStorage
+  // 键不再被读取（全高卡片无可拖拽意义）。
   const audioRef = useRef<HTMLAudioElement>(null)
   const lyricsRef = useRef<HTMLDivElement>(null)
   const trackListRef = useRef<HTMLDivElement>(null)
@@ -701,11 +691,8 @@ export function FloatingMusicPlayer({ visible, onClose, initialQuery, queryNonce
       // 我方有歌词时给足阅读宽度, 无歌词收窄)
       // 2026-08-15 实机反馈: 720px 档太大——收窄为 480px/380px 两档; 二次反馈仍大
       // → 420px/320px; 三次反馈再收窄 → 360px/280px(接近参考实现窄卡)
+      // 2026-09-19: 高度对齐台风/热点(默认全高), 移除 fitContent/可拖拽
       width={showLyrics && lyrics.length > 0 ? 'min(32vw, 360px)' : 'min(24vw, 280px)'}
-      fitContent
-      draggable
-      dragOffset={dragOffset ?? undefined}
-      onDragOffsetChange={setDragOffset}
     >
       <div
         className="flex flex-col overflow-hidden flex-1 min-h-0"

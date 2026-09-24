@@ -11,6 +11,19 @@
 
 import { useEffect, useRef } from 'react'
 import { playSound } from '../../hooks/useSoundEffects'
+// 2026-09-23 动感增强（用户反馈「波动太小，要像黑洞拉扯」）: 包络/弹簧/潮汐抽成纯函数，
+// 逐帧积分（替代旧的"每次 prop 变化只走 15%"），单测见 lib/orb-dynamics.test.ts
+import {
+  ORB_DYN,
+  clampPull,
+  envStep,
+  isFastFresh,
+  perceptual,
+  pullTarget,
+  radialScale,
+  springStep,
+  tideWeight,
+} from '../../lib/orb-dynamics'
 
 // ─── Fibonacci 球面采样 ──────────────────────────────────
 function fibSphere(n: number, r: number) {
@@ -110,9 +123,11 @@ export const MODE_CFG: Record<string, ModeConfig> = {
   },
   thinking: {
     // 思考中 — 品牌橙扫描环（P5.5）：LLM 处理时球外橙色光弧旋转
-    r: [249, 115, 22],
-    g: [140, 70, 30],
-    b: [40, 25, 60],
+    // 2026-09-24 会客厅轮: 暗端降饱和加暖（249,140,40 → 214,132,60）——满饱和橙在
+    // 长时间思考时看着像"卡住的警示灯"，降一档更像"在运转"
+    r: [214, 132, 48],
+    g: [132, 70, 32],
+    b: [60, 30, 62],
     baseAmp: 0.045,
     volAmp: 0,
     baseSpd: 0.9,
@@ -125,8 +140,10 @@ export const MODE_CFG: Record<string, ModeConfig> = {
   },
   speaking: {
     // 2026-08-14(用户反馈确认): 播放声音 = 科技蓝（语义保持, 无需改动）
-    r: [20, 50, 80],
-    g: [40, 100, 180],
+    // 2026-09-24 会客厅轮: 亮端向青白提亮（80,180,255 → 150,220,255）——"在说"与
+    // "在听"（绿）原本明度太接近，1–2m 外或投屏时只看颜色分不清是在听还是在说
+    r: [20, 60, 150],
+    g: [40, 120, 220],
     b: [120, 200, 255],
     baseAmp: 0.07,
     volAmp: 0.9,
@@ -137,6 +154,23 @@ export const MODE_CFG: Record<string, ModeConfig> = {
     dotAlphaMin: 0.15,
     dotAlphaMax: 0.92,
     fx: { type: 'pulse', glow: 1.0 },
+  },
+  waiting: {
+    // 2026-09-24 会客厅轮(P5 用户拍板): 「待批准」——唯一需要老板出手的状态，此前
+    // 只出现在对话卡注意带里，球本身毫无提示。琥珀慢脉冲（ripple 涟漪，该特效早已
+    // 实现但没有任何状态使用过）：余光就能察觉"有东西在等我"。
+    r: [255, 170, 70],
+    g: [150, 110, 50],
+    b: [40, 60, 90],
+    baseAmp: 0.035,
+    volAmp: 0,
+    baseSpd: 0.45,
+    volSpd: 0,
+    rotSpd: 0,
+    noiseGain: 0.9,
+    dotAlphaMin: 0.14,
+    dotAlphaMax: 0.78,
+    fx: { type: 'ripple', speed: 0.45, count: 2 },
   },
 }
 
@@ -195,7 +229,7 @@ function applyTint(
 // ─── 组件 ─────────────────────────────────────────────────
 
 interface VoiceOrbProps {
-  mode: 'idle' | 'listening' | 'thinking' | 'speaking' | 'muted'  // P5.5: +thinking
+  mode: 'idle' | 'listening' | 'thinking' | 'speaking' | 'waiting' | 'muted'  // P5.5: +thinking; 2026-09-24: +waiting(待批准)
   volume?: number  // 0~0.5
   size?: number
   /** P7: 场景语义色 (RGB 0-255)，注入后点云 + fx 颜色均向该色偏移 */
@@ -208,7 +242,16 @@ export function VoiceOrb({ mode, volume = 0, size = 140, tint, variant = 'standa
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef(0)
   const cfgRef = useRef(MODE_CFG.idle)
+  /** prop 音量目标（0-1）——平滑已交给逐帧包络（envStep），本 ref 只存目标值 */
   const volRef = useRef(0)
+  /** 2026-09-23: 能量包络（0-1，快起慢落）——所有音量驱动效果的唯一输入 */
+  const envRef = useRef(0)
+  /** 2026-09-23: 快速能量通道读数 + 到达时刻（聆听期每帧 RMS / 播报期 TTS 音量） */
+  const fastVolRef = useRef(0)
+  const fastAtRef = useRef(0)
+  /** 2026-09-23: 全局拉扯位移与其速度（二阶弹簧：过冲回弹 = "被吸住"手感） */
+  const pullRef = useRef(0)
+  const pullVelRef = useRef(0)
   const lerpAmp = useRef(0.04)
   const lerpSpd = useRef(0.6)
   const lerpRot = useRef(0.5)
@@ -223,9 +266,15 @@ export function VoiceOrb({ mode, volume = 0, size = 140, tint, variant = 'standa
   // 预计算球面点
   const outerPts = useRef<number[][]>([])
   const innerPts = useRef<number[][]>([])
+  // 2026-09-23: 潮汐形变权重按点预计算（四极子 3y²-1）——逐帧每点只多一次乘加，
+  // 不引入逐点三角函数（4400 点每帧一次 sin 已是既有的最大开销）
+  const outerTide = useRef<Float32Array>(new Float32Array(0))
+  const innerTide = useRef<Float32Array>(new Float32Array(0))
   if (outerPts.current.length === 0) {
     outerPts.current = fibSphere(3200, 1.0)
     innerPts.current = fibSphere(1200, 0.88)
+    outerTide.current = Float32Array.from(outerPts.current, p => tideWeight(p[1]))
+    innerTide.current = Float32Array.from(innerPts.current, p => tideWeight(p[1]))
   }
 
   // 模式 / 场景语义色 / 频谱形态 切换：更新目标配置 + 触发音效
@@ -256,10 +305,25 @@ export function VoiceOrb({ mode, volume = 0, size = 140, tint, variant = 'standa
     prevModeRef.current = mode
   }, [mode, variant, tint])
 
-  // 音量平滑
+  // 音量目标（prop）——平滑改由逐帧包络承担（见 draw() 内 envStep）
   useEffect(() => {
-    volRef.current += (volume - volRef.current) * 0.15
+    volRef.current = Math.max(0, Math.min(1, volume))
   }, [volume])
+
+  // 2026-09-23 快速能量通道: crabpaw:voice-energy-fast（聆听期每帧 RMS ~8Hz；播报期
+  // TTS 音量 60ms 级）。直写 ref，不触发 React 重渲染——球的 60fps 动画不该驮着整树
+  // setState（旧实现走 VoiceShell state，1s 一跳，这是"波动小"的第二根因）。
+  useEffect(() => {
+    const onFast = (e: Event) => {
+      const raw = (e as CustomEvent<number | { level?: number }>).detail
+      const lvl = typeof raw === 'number' ? raw : Number(raw?.level)
+      if (!Number.isFinite(lvl)) return
+      fastVolRef.current = Math.max(0, Math.min(1, lvl))
+      fastAtRef.current = performance.now()
+    }
+    window.addEventListener('crabpaw:voice-energy-fast', onFast)
+    return () => window.removeEventListener('crabpaw:voice-energy-fast', onFast)
+  }, [])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -270,10 +334,17 @@ export function VoiceOrb({ mode, volume = 0, size = 140, tint, variant = 'standa
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect()
-      W = rect.width * dpr; H = rect.height * dpr
+      const w = rect.width * dpr, h = rect.height * dpr
+      // 2026-09-23 实测修复: 零尺寸不得写进位图。父容器 display:none / 尚未布局时
+      // rect=0，写进去就是 0×0 位图；而 ResizeObserver 只报"尺寸变化"，此后父容器
+      // 尺寸不再变化就再也不会触发 → 球永久空白（本机最大化窗口后当场复现；且把本轮
+      // 全部改动回退后仍然空白 → 是既有缺陷，不是本轮引入）。返回 false = 尚未就绪。
+      if (!(w > 0) || !(h > 0)) return false
+      W = w; H = h
       canvas.width = W; canvas.height = H
       cx = W / 2; cy = H / 2
       scale = Math.min(W, H) * 0.38
+      return true
     }
     resize()
 
@@ -292,15 +363,61 @@ export function VoiceOrb({ mode, volume = 0, size = 140, tint, variant = 'standa
       const dt = lastTs ? Math.min((now - lastTs) / 1000, 0.1) : 0.016
       lastTs = now
 
-      const cfg = cfgRef.current
-      const v = volRef.current
+      // 位图尚未就绪（挂载时零尺寸 / 被上面的守卫拦下）→ 每帧重试，直到拿到真实尺寸。
+      // "空白球"的兜底自愈: 不再依赖 ResizeObserver 恰好再报一次尺寸变化。
+      if (W === 0 || H === 0) {
+        if (!resize()) {
+          rafRef.current = requestAnimationFrame(draw)
+          return
+        }
+      }
 
-      // 各参数平滑过渡到目标值
-      const tAmp = cfg.baseAmp + v * cfg.volAmp
-      const tSpd = cfg.baseSpd + v * cfg.volSpd
+      const cfg = cfgRef.current
+
+      // ── 2026-09-23 动感增强: 逐帧能量积分（替代旧的"每次 prop 变化只走 15%"）──
+      // 旧实现的两个问题: ①聆听期能量信号 1s 一跳, 每次只补 15% 的差距 → 峰值
+      // 永远到不了, 球看起来几乎不动; ②播报期 prop 恒 0(球根本收不到 TTS 音量)。
+      // 现在: 目标取 max(慢态 prop, 快速通道) + 逐帧包络, 峰值真实可达。
+      const nowMs = performance.now()
+      const fastFresh = isFastFresh(nowMs, fastAtRef.current)
+      const volTarget = Math.max(volRef.current, fastFresh ? fastVolRef.current : 0)
+      // 非对称包络: 声音一进来立刻抬(45ms), 说完缓慢回落(260ms) → 有"呼吸"不僵硬
+      envRef.current = envStep(envRef.current, volTarget, dt)
+      // 感知曲线: 中小音量抬起来(正常说话就看得见波动), 0 仍映射到 0(安静=静态)
+      const vEff = perceptual(envRef.current)
+      // 拉扯/潮汐只在"音量驱动型"状态生效(volAmp>0)——关闭态(idle 白球)与思考态
+      // 零响应, 保住「关闭=定格的珍珠」这条既有裁决
+      const dynOn = cfg.volAmp > 0
+      // 关闭态(无基础幅度/无旋转/无音量驱动)= 完全静止: 把三个 lerp 直接归零。
+      // 旧实现的渐近尾巴会让"定格"的白球残留约 0.14px 的逐帧漂移（实测），
+      // 与「关闭 = 定格的珍珠」这条既有裁决不符。
+      const hardStatic = !dynOn && cfg.baseAmp === 0 && cfg.rotSpd === 0
+      if (hardStatic) {
+        lerpAmp.current = 0
+        lerpSpd.current = 0
+        lerpRot.current = 0
+      }
+      // 全局拉扯(二阶弹簧): 聆听=被吸进去(收缩), 播报=顶出来(扩张), 过冲即"回弹"。
+      // 非音量驱动型状态直接归零(而不是让它慢慢衰减)——关闭态必须逐帧定格,
+      // 不能出现"静音后白球还在缓动一秒"的余波
+      if (dynOn) {
+        const pullSpring = springStep(pullRef.current, pullVelRef.current, pullTarget(mode, vEff), dt)
+        pullRef.current = clampPull(pullSpring.value)
+        pullVelRef.current = pullSpring.vel
+      } else {
+        pullRef.current = 0
+        pullVelRef.current = 0
+      }
+      // 潮汐形变相位: 每帧一次正弦, 逐点只做一次乘加(见 projectPts 的 tideD)
+      const tidePhase = dynOn ? Math.sin(tRef.current * 1.7) * ORB_DYN.tideGain * vEff : 0
+
+      // 各参数平滑过渡到目标值（时间常数同前, 手感不变; amp 一路加快——
+      // 旧的 dt*6(τ≈167ms) 会把 45ms 的包络攻击重新拖慢, 手感又变钝）
+      const tAmp = cfg.baseAmp + envRef.current * cfg.volAmp
+      const tSpd = cfg.baseSpd + envRef.current * cfg.volSpd
       const tRot = cfg.rotSpd
 
-      lerpAmp.current += (tAmp - lerpAmp.current) * Math.min(dt * 6, 1)
+      lerpAmp.current += (tAmp - lerpAmp.current) * Math.min(dt * 14, 1)
       lerpSpd.current += (tSpd - lerpSpd.current) * Math.min(dt * 5, 1)
       lerpRot.current += (tRot - lerpRot.current) * Math.min(dt * 4, 1)
 
@@ -319,13 +436,21 @@ export function VoiceOrb({ mode, volume = 0, size = 140, tint, variant = 'standa
 
       ctx.clearRect(0, 0, W, H)
 
-      // 投影所有点
+      // 投影所有点（全局拉扯作用于投影尺寸: 球整体收缩/扩张 + 过冲回弹）
       const isSpectrum = isSpectrumRef.current
+      const sProj = scale * (1 + (dynOn ? pullRef.current : 0))
       const projected: Array<{ sx: number; sy: number; z: number; depth: number; dotR: number; colorD: number }> = []
-      const projectPts = (pts: number[][], baseR: number) => {
+      // tideSign: 外壳与内壳反相（外壳被拉长时内壳被挤扁）——两层视差给出"引力井"的纵深
+      const projectPts = (pts: number[][], baseR: number, tide: Float32Array, tideSign: number) => {
         for (let i = 0; i < pts.length; i++) {
           const p = pts[i]
-          const d = 1.0 + sn(p[0], p[1], p[2], tRef.current) * amp * cfg.noiseGain
+          // 潮汐形变: 沿半径的四极子形变（极点↔赤道交替拉长/挤扁）——"被引力拉扯"的观感
+          const tideD = tidePhase ? tide[i] * tidePhase * tideSign : 0
+          // 软饱和后的半径倍率（dFloor: 极端参数下点也不得穿过球心）
+          const d = Math.max(
+            ORB_DYN.dFloor,
+            radialScale(sn(p[0], p[1], p[2], tRef.current) * amp * cfg.noiseGain + tideD),
+          )
           const cosY = Math.cos(rotYRef.current), sinY = Math.sin(rotYRef.current)
           const rx2 = p[0] * d * cosY - p[2] * d * sinY
           const rz = p[0] * d * sinY + p[2] * d * cosY
@@ -333,21 +458,21 @@ export function VoiceOrb({ mode, volume = 0, size = 140, tint, variant = 'standa
           const cosX = Math.cos(rx), sinX = Math.sin(rx)
           const ry3 = ry2 * cosX - rz * sinX
           const rz3 = ry2 * sinX + rz * cosX
-          let sx = cx + rx2 * scale
-          let sy = cy - ry3 * scale
+          let sx = cx + rx2 * sProj
+          let sy = cy - ry3 * sProj
           // P7 频谱喷流位移：有音量时点云沿 y 轴随正弦分裂为粒子流
-          if (isSpectrum && v > 0.05) {
-            sy += Math.sin(i * 0.3 + tRef.current) * v * scale * 0.5
+          if (isSpectrum && vEff > 0.05) {
+            sy += Math.sin(i * 0.3 + tRef.current) * vEff * sProj * 0.5
           }
           const depth = (rz3 + 1.5) / 3.0
           // P7 频谱色相偏移：深度 + 音量驱动三通道近似 hue shift
-          const colorD = isSpectrum ? Math.max(0, Math.min(1, depth + v * 0.3)) : depth
+          const colorD = isSpectrum ? Math.max(0, Math.min(1, depth + vEff * 0.3)) : depth
           const dotR = baseR + depth * 0.8 + amp * 2
           projected.push({ sx, sy, z: rz3, depth, dotR, colorD })
         }
       }
-      projectPts(outerPts.current, 0.6)
-      projectPts(innerPts.current, 0.4)
+      projectPts(outerPts.current, 0.6, outerTide.current, 1)
+      projectPts(innerPts.current, 0.4, innerTide.current, -0.6)
 
       // 按 Z 排序（远处先画）
       projected.sort((a, b) => a.z - b.z)
@@ -396,7 +521,9 @@ export function VoiceOrb({ mode, volume = 0, size = 140, tint, variant = 'standa
           ctx.arc(cx, cy, rr, ang, ang + Math.PI * 1.25)
           ctx.stroke()
         } else if (fx.type === 'pulse') {
-          const glow = (fx.glow || 1) * (0.5 + volRef.current * 1.2)
+          // 2026-09-23: 改用包络（不再读 prop 音量）——播报期球的 volume prop 恒为 0，
+          // 旧写法导致光晕强度恒定，球"在说话却毫无起伏"
+          const glow = (fx.glow || 1) * (0.5 + envRef.current * 1.2)
           const [pr, pg, pb] = fxPulseRef.current
           const grad = ctx.createRadialGradient(cx, cy, scale * 0.4, cx, cy, scale * 1.1)
           grad.addColorStop(0, `rgba(${pr},${pg},${pb},${0.10 * glow})`)

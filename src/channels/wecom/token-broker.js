@@ -23,7 +23,15 @@ async function getWecomToken(corpId, secret, kind = '') {
     const resp = await fetch(url);
     const data = await resp.json();
     if (data.errcode !== 0) {
-      throw new Error(`获取access_token失败: [${data.errcode}] ${data.errmsg}`);
+      let msg = `获取access_token失败: [${data.errcode}] ${data.errmsg}`;
+      // 2026-09-19: 凭证类错误给出可操作指引——此前模型收到裸错误后盲目重试
+      // (实测同一轮里 WeComSendText 连发 3 次全 40001, 浪费轮次且用户得不到原因)
+      if (data.errcode === 40001) {
+        msg += '（企业微信凭证无效——请在 管理舱→系统设置 重新录入企业微信 Secret；若近期在企微管理后台重置过应用密钥，旧 Secret 已立即失效。修复前请勿重复尝试发送）';
+      } else if (data.errcode === 60020) {
+        msg += '（访问 IP 不在应用可信 IP 列表——请在企微管理后台将该出口 IP 加入可信 IP）';
+      }
+      throw new Error(msg);
     }
     const expireSec = Math.max(Number(data.expires_in) || 7200, 600);
     _tokens.set(key, { token: data.access_token, expire: Date.now() + (expireSec - 300) * 1000 });

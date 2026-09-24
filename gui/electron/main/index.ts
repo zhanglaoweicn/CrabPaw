@@ -582,8 +582,11 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
-    minWidth: 900,
-    minHeight: 600,
+    // 2026-09-23 排版轮: 900×600 时极简布局必然打架——左列 264 + 球卡 442 + 对话卡
+    // 404.8 + 间隙/边距 需要约 1180 宽；低于此值时球块会自动改为内联（见 VoiceShell
+    // 的 orbInline），这里再把下限抬到"不会一开窗就撞"的位置。
+    minWidth: 1180,
+    minHeight: 640,
     title: 'CrabPaw',
     icon: nativeImage.createFromPath(iconPath),
     backgroundColor: '#0a0a0a',
@@ -711,14 +714,18 @@ function setupCrashRecovery(webContents: any) {
 }
 
   if (VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(VITE_DEV_SERVER_URL)
+    // 2026-09-24 会客厅/一体机: kiosk 标志随 URL 进渲染层（?kiosk=1）——渲染层据此
+    // 切换"会客厅 UI 态"（放大球/隐藏遥测/触摸手势/脱敏）。用 URL 参数而非 IPC：
+    // 同步可读（首帧就是会客厅态，不闪一次工位版），dev 与打包两条加载路径都成立，
+    // 且浏览器里加 ?kiosk=1 就能验收同一套界面。
+    mainWindow.loadURL(winMode.kiosk ? `${VITE_DEV_SERVER_URL}?kiosk=1` : VITE_DEV_SERVER_URL)
     setupCrashRecovery(mainWindow.webContents)
     // E2E 测试模式下不自动打开 DevTools（避免 Playwright 连接到 DevTools 窗口）
     if (!process.env.CRABPAW_E2E) {
       mainWindow?.webContents.openDevTools()
     }
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'))
+    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'), winMode.kiosk ? { query: { kiosk: '1' } } : undefined)
     setupCrashRecovery(mainWindow.webContents)
     // Production: log renderer errors to main process console
     // T1.18: 生产环境不自动打开 DevTools——仅 CRABPAW_E2E / CRABPAW_DEBUG 调试环境开;

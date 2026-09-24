@@ -137,6 +137,17 @@ async function handleExpertsAPI(req, res, _ctx) {
           if (!r.ok) return sendJson(res, 400, { success: false, error: `插话未生效: ${r.reason}` });
           return sendJson(res, 200, { success: true, data: r });
         }
+        // POST /api/experts/roundtable/:id/cancel — 老板中止会议（2026-09-23）
+        // 不删已产生的发言，只让后续专家不再开口；正在发言的那位会说完（单条
+        // LLM 调用不可中断），最终以 roundtable:ended(status='cancelled') 收尾。
+        if (pathParts[1] && pathParts[2] === 'cancel') {
+          const r = rt.cancelRoundtable(pathParts[1]);
+          if (!r.ok) {
+            const msg = r.reason === 'meeting_ended' ? '会议已结束' : '会议不存在';
+            return sendJson(res, r.reason === 'not_found' ? 404 : 400, { success: false, error: msg });
+          }
+          return sendJson(res, 200, { success: true, data: r });
+        }
         return sendJson(res, 404, { success: false, error: '未知圆桌操作' });
       }
       if (pathParts[0] === 'route') {

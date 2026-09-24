@@ -10,6 +10,9 @@ import {
   Info,
 } from 'lucide-react'
 import { OrbTopBlock } from './OrbTopBlock'
+// 2026-09-22 体验层: 左栏「要办的事」页签——事务账本（审批/任务终态统一队列）
+import { TaskLedger } from './TaskLedger'
+import { announce } from '../../lib/notices'
 // 2026-08-19 三栏联动轮: 回放条数据源——sse-hub 帧缓冲快照(纯数据, 无订阅副作用)
 import { getSseReplayBuffer, type SseReplayFrame } from '../../lib/sse-hub'
 // 2026-09-03 方案A改版(回合摘要卡): 回合分组/工具合并/语义化摘要——与 SysInfoCard 共用
@@ -21,7 +24,7 @@ import {
 } from '../../lib/log-summary'
 
 interface AgentLeftPanelProps {
-  /** 2026-08-15: 名称展示已删除(仅留"用户消息处理器"标题)——prop 保留兼容, 不再渲染 */
+  /** 2026-08-15: 名称展示已删除(仅留一个朴实的功能标题, 现为「工作台」)——prop 保留兼容, 不再渲染 */
   transactions?: number
   tools?: number
   /** 2026-08-15: Constraint 指标删除——参考实现遗留占位, 无真实数据源(恒 '—') */
@@ -32,7 +35,7 @@ interface AgentLeftPanelProps {
   logs?: LogEntry[]
   onReset?: () => void
   /** G1: 语音球 + 语速三档（2026-08-14 自右栏迁移至此, DingDong 对齐） */
-  orbMode?: 'idle' | 'listening' | 'thinking' | 'speaking'
+  orbMode?: 'idle' | 'listening' | 'thinking' | 'speaking' | 'waiting'
   muted?: boolean
   /** 2026-08-24: 能量电平——绿态静态/动态波动幅度 */
   volume?: number
@@ -97,6 +100,18 @@ export function AgentLeftPanel({
   // 错误/警告易被淹没, 一键只看重要系统事件(纯本地视图过滤, 不落库)
   // 2026-08-19 三栏联动轮: 扩展为三档过滤器——全部 / 工具 / 重要
   const [filterMode, setFilterMode] = useState<'all' | 'tools' | 'important'>('all')
+  // ── 2026-09-22 体验层: 左栏双页签 ──
+  // 「要办的事」(ledger, 默认) = 事务账本——回答"我现在该做什么"；
+  // 「运行日志」(log) = 原有遥测与事件时间线（事务/工具计数、Memory/Knowledge/
+  // Decayed 指标、轮次时间线、seq 帧回放）——能力一个没少，只是不再占据老板
+  // 视野里最贵的那一栏。默认落账本：有内容时说清该办什么，没内容时"现在没事"
+  // 本身就是有用的一句话。
+  const [leftTab, setLeftTab] = useState<'ledger' | 'log'>(() => {
+    try { return localStorage.getItem('voice-shell.left.tab') === 'log' ? 'log' : 'ledger' } catch { return 'ledger' }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('voice-shell.left.tab', leftTab) } catch { /* 忽略 */ }
+  }, [leftTab])
   // 2026-08-19 三栏联动轮: 轮次组折叠(用户显式覆盖 Map<组 key, 是否折叠>)
   // 2026-09-03 方案A改版(回合摘要卡): 默认态改为"仅最新回合展开,历史回合折叠成
   // 一行摘要"——旧默认全展开导致长流水噪音。Map 为用户显式覆盖(点箭头写入),
@@ -242,8 +257,10 @@ export function AgentLeftPanel({
         WebkitBackdropFilter: 'blur(20px)',
       }}
     >
-      {/* 2026-08-15 用户要求: "认知参谋"/名称头像全部删除, 仅保留"用户消息处理器"
-          作为左栏标题(字号放大)—— compact 模式隐藏 */}
+      {/* 标题沿革: 2026-08-15 用户要求删除"认知参谋"名称头像，仅保留一个朴实的功能名
+          （原标题"用户消息处理器"）；2026-09-23 该栏默认页签已是「要办的事」(事务账本)，
+          "消息处理器"既是工程术语又与内容不符，用户拍板改为「工作台」——中性词，
+          同时盖住"要办的事 / 运行日志"两个页签。compact 模式隐藏。 */}
       {!compact && (
       <div style={{ padding: '14px 16px 12px', borderBottom: '1px solid rgba(56, 189, 248, 0.12)' }}>
         <span style={{
@@ -251,7 +268,7 @@ export function AgentLeftPanel({
           fontWeight: 700,
           letterSpacing: 0.5,
           color: 'rgba(243, 245, 251, 0.95)',
-        }}>用户消息处理器</span>
+        }}>工作台</span>
       </div>
       )}
 
@@ -271,8 +288,56 @@ export function AgentLeftPanel({
         onCycleMicMode={onCycleMicMode}
       />
 
-      {/* 状态行 —— compact 模式隐藏 */}
+      {/* 2026-09-22 体验层: 页签栏——语音球常驻其上（随手可及），此处只切换"看什么"。
+          compact 态（热点/台风/股票组合布局）只有语音球，不渲染页签。 */}
       {!compact && (
+        <div style={{ display: 'flex', gap: 4, padding: '6px 12px 4px' }}>
+          <button
+            type="button"
+            onClick={() => setLeftTab('ledger')}
+            title="今天要办的事（审批/任务终态统一队列）"
+            style={{
+              flex: 1,
+              fontSize: 11,
+              fontWeight: 500,
+              padding: '4px 0',
+              cursor: 'pointer',
+              borderRadius: 'var(--radius-sm)',
+              border: leftTab === 'ledger' ? '1px solid var(--accent-primary)' : '1px solid var(--border-primary)',
+              background: leftTab === 'ledger' ? 'var(--accent-muted)' : 'transparent',
+              color: leftTab === 'ledger' ? 'var(--accent-primary)' : 'var(--text-muted)',
+            }}
+          >
+            要办的事
+          </button>
+          <button
+            type="button"
+            onClick={() => setLeftTab('log')}
+            title="运行日志（事件时间线 / 指标 / 帧回放）"
+            style={{
+              flex: 1,
+              fontSize: 11,
+              fontWeight: 500,
+              padding: '4px 0',
+              cursor: 'pointer',
+              borderRadius: 'var(--radius-sm)',
+              border: leftTab === 'log' ? '1px solid var(--accent-primary)' : '1px solid var(--border-primary)',
+              background: leftTab === 'log' ? 'var(--accent-muted)' : 'transparent',
+              color: leftTab === 'log' ? 'var(--accent-primary)' : 'var(--text-muted)',
+            }}
+          >
+            运行日志
+          </button>
+        </div>
+      )}
+
+      {/* 账本页——需要老板出手的事排最前，可直接批准/拒绝/知道了 */}
+      {!compact && leftTab === 'ledger' && (
+        <TaskLedger onSpeakHint={(t) => announce(t, { kind: 'approval' })} />
+      )}
+
+      {/* 状态行 —— compact 模式隐藏（运行日志页） */}
+      {!compact && leftTab === 'log' && (
       <div
         style={{
           display: 'flex',
@@ -286,8 +351,8 @@ export function AgentLeftPanel({
       </div>
       )}
 
-      {/* 统计行 —— compact 模式隐藏 */}
-      {!compact && (
+      {/* 统计行 —— compact 模式隐藏（运行日志页） */}
+      {!compact && leftTab === 'log' && (
       <div
         style={{
           display: 'grid',
@@ -308,8 +373,8 @@ export function AgentLeftPanel({
 
       {/* 事件日志时间线（2026-08-15 左右日志合并: 全量事件——用户发言/思考/工具/
           完成/系统, 轮次分组; 右栏删除历史区块只留"本轮进行中", 左右不再双显。
-          —— compact 模式隐藏） */}
-      {!compact && (
+          —— compact 模式隐藏；2026-09-22 起归入「运行日志」页签，让出默认视野） */}
+      {!compact && leftTab === 'log' && (
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {/* 2026-08-15 参考实现移植: AI 活动状态行(ai-activity 区)——纯前端
             60s 窗口三态派生, 忙碌=蓝+脉冲点, 刚完成/空闲=灰 */}

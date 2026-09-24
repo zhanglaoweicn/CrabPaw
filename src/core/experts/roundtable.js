@@ -47,6 +47,13 @@ const _roundtables = new Map();      // meetingId -> state
 const _recentStarts = new Map();     // sessionId -> startedAt（幂等）
 let _saveChain = Promise.resolve();  // 写盘串行链（防并发撕裂）
 
+/**
+ * 终态阶段（2026-09-23 取消能力）。
+ * 'cancelled' 与 'error' 分开：老板主动喊停不是失败，不该落异常口径，
+ * 也不该被 findRunning 当成"还有一场在跑"。
+ */
+const TERMINAL_PHASES = ['done', 'error', 'cancelled'];
+
 function _ensureDirs() { fs.mkdirSync(RT_DIR, { recursive: true }); }
 
 function _loadState(meetingId) {
@@ -381,31 +388,63 @@ async function _generatePlanDoc(state) {
   }
 }
 
+/**
+ * 主动取消的收尾（2026-09-23）。
+ * 与 error 分开：老板喊停不是失败。已产生的发言一律保留——中止的是"继续讨论"，
+ * 不是"删掉说过的"。前端据 roundtable:ended.status='cancelled' 提示"已中止"。
+ */
+function _endCancelled(state) {
+  state.phase = 'cancelled';
+  state.finishedAt = Date.now();
+  _save(state);
+  const { recordActivity } = require('./collaboration');
+  recordActivity({
+    type: 'collab:cancelled',
+    content: `圆桌会「${String(state.goal).slice(0, 60)}」已由老板中止（${(state.statements || []).length} 条发言保留）`,
+  });
+  broadcastEvent('roundtable:ended', {
+    meetingId: state.meetingId,
+    status: 'cancelled',
+    statementCount: (state.statements || []).length,
+    taskCount: 0,
+    document: state.document || null,
+  });
+}
+
 async function _orchestrate(state, runner) {
   const startedAt = Date.now();
   const expired = () => Date.now() - startedAt > TOTAL_DEADLINE_MS;
+  // 2026-09-23: 取消与超时共用同一批循环检查点——两者都表现为"下一位不再开口"。
+  // 注意只有 cancelRequested 走 _endCancelled；deadline 仍沿用原有的收敛语义
+  // （跳出循环继续收口），不改变既有行为。
+  const shouldStop = () => state.cancelRequested === true || expired();
   try {
     // 第一轮：主持先开场，成员依次独立立场
     _setPhase(state, 'round1', 1);
     const r1Roster = [state.host, ...(state.members || [])].filter(Boolean);
     for (const expert of r1Roster) {
-      if (expired()) break;
+      if (shouldStop()) break;
       await _runStatement(state, runner, expert, 1, statementPrompt(expert, state, 1));
     }
+    // 取消的检查点紧跟在等待之后：单条 LLM 调用不可中断，所以正在发言的那一位
+    // 会说完、下一位不再开口（前端文案与此一致，不承诺"立即静音"）。
+    if (state.cancelRequested) return _endCancelled(state);
     const r1Ok = (state.statements || []).filter((s) => s.round === 1 && !s.failed);
     if (r1Ok.length === 0) throw new Error('第一轮全部发言失败');
 
     // 第二轮：成员交锋对齐（含老板插话回看）
     _setPhase(state, 'round2', 2);
     for (const expert of state.members || []) {
-      if (expired()) break;
+      if (shouldStop()) break;
       await _runStatement(state, runner, expert, 2, statementPrompt(expert, state, 2));
     }
+    if (state.cancelRequested) return _endCancelled(state);
 
     // 主持收口：结论 + 任务清单
     _setPhase(state, 'synthesis', 3);
     const hostExpert = getExpert(state.host.id) || state.host;
     const synth = await _runStatement(state, runner, { ...hostExpert, voice: state.host.voice }, 3, synthesisPrompt(state));
+    if (state.cancelRequested) return _endCancelled(state);
     if (!synth || synth.failed) throw new Error('主持收口失败');
     state.conclusion = parseConclusion(synth.text);
     _save(state);
@@ -445,7 +484,7 @@ async function _orchestrate(state, runner) {
 // ─── 公共 API ──────────────────────────────────────────
 function findRunning() {
   for (const [, s] of _roundtables) {
-    if (!['done', 'error'].includes(s.phase)) return s;
+    if (!TERMINAL_PHASES.includes(s.phase)) return s;
   }
   return null;
 }
@@ -518,7 +557,7 @@ async function startRoundtable(params, opts = {}) {
 function interveneRoundtable(meetingId, text) {
   const state = _loadState(String(meetingId || ''));
   if (!state) return { ok: false, reason: 'not_found' };
-  if (['done', 'error'].includes(state.phase)) return { ok: false, reason: 'meeting_ended' };
+  if (TERMINAL_PHASES.includes(state.phase)) return { ok: false, reason: 'meeting_ended' };
   const clean = String(text || '').trim().slice(0, 300);
   if (!clean) return { ok: false, reason: 'empty' };
   state.interventions = state.interventions || [];
@@ -526,6 +565,26 @@ function interveneRoundtable(meetingId, text) {
   _save(state);
   broadcastEvent('roundtable:intervention', { meetingId, intervention: state.interventions[state.interventions.length - 1] });
   return { ok: true, seq: state.interventions.length };
+}
+
+/**
+ * 中止圆桌会（2026-09-23）。
+ *
+ * 语义：不删任何已产生的发言，只让"后面的专家不再开口"。单条 LLM 调用不可
+ * 中断，所以正在发言的那一位会把话说完——这是诚实的粒度，前端文案与此一致。
+ *
+ * 幂等：置位 cancelRequested 后立即返回 ok；编排循环在下一个检查点收尾并广播
+ * roundtable:ended(status='cancelled')。已是终态的会议返回 meeting_ended。
+ */
+function cancelRoundtable(meetingId) {
+  const state = _loadState(String(meetingId || ''));
+  if (!state) return { ok: false, reason: 'not_found' };
+  if (TERMINAL_PHASES.includes(state.phase)) return { ok: false, reason: 'meeting_ended' };
+  // 已请求过取消：直接成功（避免前端连点重复置位/重复广播）
+  if (state.cancelRequested === true) return { ok: true, alreadyRequested: true };
+  state.cancelRequested = true;
+  _save(state);
+  return { ok: true };
 }
 
 function getRoundtable(meetingId) {
@@ -537,6 +596,8 @@ function getRoundtable(meetingId) {
     statements: state.statements, interventions: state.interventions,
     conclusion: state.conclusion, document: state.document,
     startedAt: state.startedAt, finishedAt: state.finishedAt, error: state.error,
+    // 2026-09-23: 中止请求已受理（前端刷新/重连后仍能显示"正在中止"）
+    cancelRequested: state.cancelRequested === true,
   };
 }
 
@@ -619,6 +680,8 @@ async function maybeAutoStartRoundtable(userId, message, opts = {}) {
 
 module.exports = {
   startRoundtable, getRoundtable, listRoundtables, interveneRoundtable,
+  // 2026-09-23: 中止能力（老板主动喊停，与 error 分开计）
+  cancelRoundtable, TERMINAL_PHASES,
   getVoiceAssignments, assignVoices, findRunning, setRoundtableDocGenerator,
   isRoundtableIntent, extractGoal, maybeAutoStartRoundtable,
   parseConclusion, statementPrompt, synthesisPrompt, selectRoster,

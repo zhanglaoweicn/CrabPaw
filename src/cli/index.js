@@ -233,6 +233,11 @@ async function runCommand(command, restArgs, _appConfig) {
     case 'stop':
       await serverCmd.handleStopCommand(restArgs, { config });
       break;
+    // 2026-09-23: 补 restart 分发——handleRestartCommand 一直是导出的，但 CLI 里没有
+    // 入口，等于死代码（实现了也调不到）。
+    case 'restart':
+      await serverCmd.handleRestartCommand(restArgs, { config });
+      break;
     case 'config':
       await configCmd.handleConfigCommand(restArgs);
       break;
@@ -321,6 +326,7 @@ CrabPaw - AI Agent Platform
 命令:
   start              启动服务器 (默认)
   stop               停止服务器
+  restart            重启服务器（停止后在同一进程内启动）
   config             配置管理
   schedule           定时任务管理
   history            历史记录管理

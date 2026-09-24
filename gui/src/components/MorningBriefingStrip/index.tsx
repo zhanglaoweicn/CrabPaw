@@ -7,7 +7,8 @@
  *
  * 诚实降级：单源失败该块不显示；全部无数据整条不渲染——不用假数字占位。
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Sun } from 'lucide-react'
 import { apiGet } from '../../lib/api'
 
 interface BriefingSnapshot {
@@ -31,7 +32,14 @@ function fmtMoney(v: number | null | undefined): string {
   return String(Math.round(v))
 }
 
-export function MorningBriefingStrip({ onAsk }: { onAsk: (text: string) => void }) {
+export function MorningBriefingStrip({ onAsk, onSummary, maskPrivate = false }: {
+  onAsk: (text: string) => void
+  /** 2026-09-24 会客厅轮: 把"有无数据/件数/派生追问"回报宿主——待机主屏的大字要事与
+   *  空态 chip 都用它（本组件已在轮询，宿主不必再拉一次） */
+  onSummary?: (s: { hasData: boolean; count: number; suggestions: string[] }) => void
+  /** 客人在场（会客厅模式）：隐藏金额与客户名——明细不进公共视野，件数仍可见 */
+  maskPrivate?: boolean
+}) {
   const [data, setData] = useState<BriefingData | null>(null)
 
   useEffect(() => {
@@ -49,11 +57,36 @@ export function MorningBriefingStrip({ onAsk }: { onAsk: (text: string) => void 
     return () => { alive = false; clearInterval(timer) }
   }, [])
 
+  // ── 2026-09-24 会客厅轮: 回报摘要（待机主屏大字要事 + 空态 chip 都用它）──
+  // 只在"摘要签名"变化时才回调——本组件 5 分钟轮询一次，若每次都推新对象，
+  // 宿主 setState 会把整个 shell 每 5 分钟重渲染一次（无谓）。
+  const lastSummaryRef = useRef('')
+  useEffect(() => {
+    const rev0 = data?.snapshot?.revenue
+    const hasR = !!data?.receivables && data.receivables.count > 0
+    const hasC = !!data?.contracts && data.contracts.count > 0
+    const hasS = !!data?.schedule && (data.schedule.count ?? 0) > 0
+    const hasRev = !!rev0 && rev0.month != null
+    const suggestions = [
+      ...(hasR ? ['看看逾期应收明细'] : []),
+      ...(hasS ? ['打开日程'] : []),
+      ...(hasC ? ['临期合同有哪些'] : []),
+      ...(hasRev ? ['这个月营收怎么样'] : []),
+    ]
+    const count = (hasR ? 1 : 0) + (hasC ? 1 : 0) + (hasS ? 1 : 0) + (hasRev ? 1 : 0)
+    const sig = `${count}|${suggestions.join(',')}`
+    if (sig === lastSummaryRef.current) return
+    lastSummaryRef.current = sig
+    onSummary?.({ hasData: count > 0, count, suggestions })
+  }, [data, onSummary])
+
   if (!data) return null
   const rev = data.snapshot?.revenue
   const hasReceivables = !!data.receivables && data.receivables.count > 0
   const hasContracts = !!data.contracts && data.contracts.count > 0
-  const hasSchedule = !!data.schedule
+  // 2026-09-23 排版轮: 计数为 0 视为"无内容"——"日程 0 项"这种指标块占掉对话卡
+  // 顶部最贵的位置却不含信息（0 项 = 没数据），与"数据全无整条隐藏"的既有原则一致
+  const hasSchedule = !!data.schedule && (data.schedule.count ?? 0) > 0
   const hasRevenue = !!rev && rev.month != null
   // 全部源都无内容 → 整条不渲染（诚实：没有数据不装作有）
   if (!hasReceivables && !hasContracts && !hasSchedule && !hasRevenue) return null
@@ -75,7 +108,9 @@ export function MorningBriefingStrip({ onAsk }: { onAsk: (text: string) => void 
       }}
       data-briefing-date={data.date}
     >
-      <span style={{ opacity: 0.5, marginRight: 2 }}>☀ 今日</span>
+      <span style={{ opacity: 0.5, marginRight: 2, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <Sun size={12} aria-hidden /> 今日
+      </span>
       {hasSchedule && (
         <button
           type="button" style={blockStyle}
@@ -91,18 +126,22 @@ export function MorningBriefingStrip({ onAsk }: { onAsk: (text: string) => void 
         <button
           type="button" style={{ ...blockStyle, borderColor: 'rgba(255,120,100,0.35)' }}
           onClick={() => onAsk('看看逾期应收明细')}
-          title={(data.receivables!.items || []).map(i => `${i.customer || '?'} ¥${fmtMoney(i.amount)}`).join(' / ')}
+          title={maskPrivate
+            ? `${data.receivables!.count} 笔应收需要跟进`
+            : (data.receivables!.items || []).map(i => `${i.customer || '?'} ¥${fmtMoney(i.amount)}`).join(' / ')}
         >
-          <span style={labelStyle}>应收逾期</span>
+          <span style={labelStyle}>{maskPrivate ? '应收提醒' : '应收逾期'}</span>
           <span style={{ ...strongStyle, color: '#ff8a7a' }}>{data.receivables!.count}</span>
-          <span style={labelStyle}>笔 · ¥{fmtMoney(data.receivables!.amount)}</span>
+          <span style={labelStyle}>{maskPrivate ? '笔待跟进' : `笔 · ¥${fmtMoney(data.receivables!.amount)}`}</span>
         </button>
       )}
       {hasContracts && (
         <button
           type="button" style={blockStyle}
           onClick={() => onAsk('临期合同有哪些')}
-          title={(data.contracts!.items || []).map(i => `${i.customer || '?'} ${i.expireDate || ''}`).join(' / ')}
+          title={maskPrivate
+            ? `${data.contracts!.count} 份合同即将到期`
+            : (data.contracts!.items || []).map(i => `${i.customer || '?'} ${i.expireDate || ''}`).join(' / ')}
         >
           <span style={labelStyle}>临期合同</span>
           <span style={strongStyle}>{data.contracts!.count}</span>

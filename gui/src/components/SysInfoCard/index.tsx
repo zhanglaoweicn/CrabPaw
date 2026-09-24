@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from 'react'
 import { ShellFloatCard } from '../ShellFloatCard'
+import { Terminal, MessageSquare, Brain, Wrench, Check, Info } from 'lucide-react'
 // 2026-09-03 方案A改版(回合摘要卡): 与 AgentLeftPanel 共用的回合分组/语义化摘要
 import {
   cleanLogText,
@@ -42,13 +43,21 @@ export interface SysInfoCardProps {
   /** 透传 ShellFloatCard resetNonce——变更时清位置持久化回默认（2026-09-07：
    *  此前写死 0，"恢复默认布局"对其余三卡生效唯独日志卡拖后无法复位） */
   resetNonce?: number
+  /** 2026-09-23 排版轮: 极简布局左列是「要办的事→心跳→运行日志」的竖排栈，
+   *  位置由 VoiceShell 按窗口高度算——允许外部覆盖默认锚点（缺省仍为心跳卡下方 420） */
+  defaultOffsetOverride?: { x: number; y: number }
 }
 
-const LOG_ICON: Record<string, string> = {
-  user: '💬', thinking: '🧠', tool: '🔧', complete: '✔', system: 'ℹ',
+/** 2026-09-24 会客厅轮: 日志行图标去 emoji（换成 lucide 线性图标，随 currentColor） */
+const LOG_ICON_NODE: Record<string, JSX.Element> = {
+  user: <MessageSquare size={11} aria-hidden />,
+  thinking: <Brain size={11} aria-hidden />,
+  tool: <Wrench size={11} aria-hidden />,
+  complete: <Check size={11} aria-hidden />,
+  system: <Info size={11} aria-hidden />,
 }
 
-export function SysInfoCard({ logs, toolRuns = [], activeToolCount = 0, resetNonce = 0 }: SysInfoCardProps) {
+export function SysInfoCard({ logs, toolRuns = [], activeToolCount = 0, resetNonce = 0, defaultOffsetOverride }: SysInfoCardProps) {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem('voice-shell.sysinfo.collapsed') !== '0' } catch { return true }
   })
@@ -78,9 +87,9 @@ export function SysInfoCard({ logs, toolRuns = [], activeToolCount = 0, resetNon
   return (
     <ShellFloatCard
       cardKey="sysinfo"
-      title="📟 日志"
+      title={<><Terminal size={13} aria-hidden /> 运行日志</>}
       width={264}
-      defaultOffset={{ x: 24, y: 420 }}
+      defaultOffset={defaultOffsetOverride ?? { x: 24, y: 420 }}
       resetNonce={resetNonce}
       blur="sm"
       dragOnButtons
@@ -156,7 +165,7 @@ export function SysInfoCard({ logs, toolRuns = [], activeToolCount = 0, resetNon
                       >
                         {folded ? '▸' : '▾'}
                       </button>
-                      <span aria-hidden="true">{LOG_ICON[g.user?.type || ''] || 'ℹ'}</span>
+                      <span aria-hidden="true">{LOG_ICON_NODE[g.user?.type || ''] || <Info size={11} />}</span>
                       <span style={{ flex: 1, color: 'var(--text-primary)', fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: g.user ? 600 : 400 }}>
                         {cleanLogText(g.user?.text || g.systems[0]?.text || '')}
                       </span>
