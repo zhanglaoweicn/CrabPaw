@@ -1,6 +1,6 @@
 {
   "name": "crabpaw-gui",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "CrabPaw Desktop GUI - Electron + React",
   "main": "dist-electron/main/index.js",
   "author": "CrabPaw Team",
@@ -177,6 +177,7 @@
           "!**/tmp_pip/**",
           "!**/tmp_*",
           "!**/jarvis-candidates/**",
+          "!**/mcp-libs/**",
           "!**/backup.log",
           "!**/.api_keys.json",
           "!**/.api_keys.json.*",
