@@ -88,11 +88,11 @@ git push gitee "refs/tags/v$ver"
   Write-Host "`n[4/6] 同步公开快照仓(linker-publish)" -ForegroundColor Cyan
   $LP = "D:\linker-publish"
   if (Test-Path $LP) {
-    $tarTmp = Join-Path $env:TEMP "crabpaw-release-tree.tar"
-    git archive --format=tar -o $tarTmp HEAD
-    & "$env:SystemRoot\System32\tar.exe" -xf $tarTmp -C $LP
-    if ($LASTEXITCODE -ne 0) { throw "快照仓 tar 解压失败 (exit $LASTEXITCODE)" }
-    Remove-Item $tarTmp -Force
+    # 2026-09-25: 改用 blob 哈希逐文件精确同步——原 `git archive + tar -xf` 整树覆盖
+    # 在 Windows 下把中文文件名写成 GBK/UTF-8 乱码副本(公开仓实测积了 18 个乱码名重复
+    # 文件), 且不删除源码仓已删的文件(陈旧残留)。脚本先打印改动范围再落盘。
+    node (Join-Path $ProjectRoot "scripts\sync-snapshot.mjs") --snap=$LP --apply
+    if ($LASTEXITCODE -ne 0) { throw "快照仓同步失败 (exit $LASTEXITCODE)" }
   Push-Location $LP
   git add -A
   $hasChanges = git status --porcelain

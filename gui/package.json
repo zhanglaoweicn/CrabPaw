@@ -1,6 +1,6 @@
 {
   "name": "crabpaw-gui",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "description": "CrabPaw Desktop GUI - Electron + React",
   "main": "dist-electron/main/index.js",
   "author": "CrabPaw Team",

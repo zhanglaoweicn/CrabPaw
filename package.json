@@ -1,6 +1,6 @@
 {
   "name": "crabpaw",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "description": "CrabPaw AI Agent Platform — 8-dimension Harness framework with multi-agent orchestration, tool self-healing, and domain skills",
   "main": "src/cli/index.js",
   "author": "CrabPaw Team",
