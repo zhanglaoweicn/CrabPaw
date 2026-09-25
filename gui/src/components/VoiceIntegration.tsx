@@ -29,6 +29,7 @@ import { setTtsVolume } from '../lib/tts-state'
 // P2(GUI 全量修复): 唤醒会话窗口内放行自动发送(修复"唤醒后说话永不发送 LLM" P0)
 import { isWakeActive, shouldAutoSend } from '../lib/voice-auto-send'
 import { registerCommandHost } from '../lib/ui-command-registry'
+import { toast } from 'sonner'
 
 // P5(GUI 全量修复 P1): 读取 Settings 麦克风选择(localStorage 'mic-device-id',
 // 与 useVoiceSession 同一键)——usePushToTalk 需要同一设备
@@ -254,7 +255,12 @@ export function VoiceIntegration({
       if (interceptLocalVoiceCommand(text)) return
       sendMessageRef.current(text)
     },
-    onError: (err: string) => console.warn('[PTT] 识别错误:', err),
+    onError: (err: string) => {
+      console.warn('[PTT] 识别错误:', err)
+      // 2026-09-25: PTT 错误原来只打日志——用户视角"按了没反应"。补可见+播报通道
+      // (与会话错误同款 crabpaw:voice-error → VoiceShell toast + TTS)。
+      window.dispatchEvent(new CustomEvent('crabpaw:voice-error', { detail: { message: err } }))
+    },
     // P5(GUI 全量修复 P1): 传 Settings 选中的麦克风——旧实现不传 micDeviceId,
     // PTT 恒用系统默认/自动选择, 与 useVoiceSession(读 localStorage 'mic-device-id')
     // 行为不一致——同一麦克风两种说话方式两个设备
@@ -263,6 +269,8 @@ export function VoiceIntegration({
 
   // ── 空格 PTT 键盘监听 ──（使用独立 PTT hook 的 start/stop/cancel）
   const pttStartRef = useRef(ptt.startRecording)
+  // 2026-09-25 PTT 死按提示计时器(非空输入框按住空格 >800ms → 可见提示)
+  const spaceBailHoldTimerRef = useRef<number | null>(null)
   const pttStopRef = useRef(ptt.stopRecording)
   const pttCancelRef = useRef(ptt.cancelRecording)
   // 2026-09-05 空格 PTT 体验修复: down 已成功开麦的标记——up 时据此无条件收麦
@@ -358,6 +366,16 @@ export function VoiceIntegration({
       const ed = editableEl(e.target)
       if (ed && !pttAllowedInEditable(ed)) {
         console.log('[Voice] PTT 忽略 Space: 焦点在输入框且有内容/合成中')
+        // 2026-09-25 PTT 死按兜底: 打字是"点按"、说话是"按住"——按住 >800ms 仍未
+        // 松开 = 用户想说话而非打字 → 可见提示, 消灭无声无息(每次按住最多一次)。
+        try {
+          if (spaceBailHoldTimerRef.current != null) clearTimeout(spaceBailHoldTimerRef.current)
+          spaceBailHoldTimerRef.current = window.setTimeout(() => {
+            spaceBailHoldTimerRef.current = null
+            if (pttStartedRef.current) return // 已开麦(竞态)不提示
+            toast('想说语音？输入框有内容时空格留给打字——清空输入框或点击空白处后再按住空格', { duration: 4000 })
+          }, 800)
+        } catch (err) { /* 提示失败不影响打字 */ }
         return
       }
       e.preventDefault()
@@ -383,6 +401,8 @@ export function VoiceIntegration({
     // ── 键盘包装：空格抬起 ──
     const up = (e: KeyboardEvent) => {
       if (e.code !== 'Space') return
+      // 2026-09-25: 松开即清"死按提示"计时器——打字点按永不触发提示
+      if (spaceBailHoldTimerRef.current != null) { clearTimeout(spaceBailHoldTimerRef.current); spaceBailHoldTimerRef.current = null }
       // 与 down 同口径: 空输入框放行(按住期间说过话), 有内容/合成中让给打字
       // 2026-09-05: down 已成功开麦时无条件收麦(静音自动解除后 mutedRef 时序不可靠)
       const ed = editableEl(e.target)
@@ -392,6 +412,8 @@ export function VoiceIntegration({
     }
     // 失焦兜底：按住空格时切窗口（keyup 丢失）→ 取消录音 + 恢复会话，不误发
     const onBlur = () => {
+      // 2026-09-25: 窗口失焦清死按提示计时器
+      if (spaceBailHoldTimerRef.current != null) { clearTimeout(spaceBailHoldTimerRef.current); spaceBailHoldTimerRef.current = null }
       // 2026-09-17: 实时通道——切窗时对已开始的按住做判停收尾(不误发, 模型自行决定)
       if (dialogChannelRef.current === 'realtime') {
         if (pttStartedRef.current) sessionRef.current.rtCommit()

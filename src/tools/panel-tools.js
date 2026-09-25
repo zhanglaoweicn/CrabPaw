@@ -130,8 +130,19 @@ registry.register({
  },
  handler: async (params, context) => {
  const { getSceneStore } = require('../core/scene/scene-store');
+ const { setPanelState } = require('../core/panel-state');
  if (params.action === 'hide') {
- try { getSceneStore().removeSurface('typhoon-panel'); } catch (e) { console.warn('[ShowTyphoon] 移除 surface 失败:', e.message); }
+ // 2026-09-25 如实关闭: removeSurface 返回 found——surface 本就不存在时如实告知
+ // "面板未打开", 不再凭空声称"已关闭"(假成功收口, 实机 21:52 卡在屏上工具却说关了);
+ // 并补 panel-state 登记(对齐 weather/stock——此前 typhoon show/hide 均不写状态,
+ // AI 上下文跟踪失真: 注入显示 closed 而 surface 在、卡也在屏上)。
+ let found = false;
+ try {
+ const r = getSceneStore().removeSurface('typhoon-panel');
+ found = !!(r && r.found);
+ } catch (e) { console.warn('[ShowTyphoon] 移除 surface 失败:', e.message); }
+ try { setPanelState('typhoon', 'closed'); } catch (e) { console.warn('[ShowTyphoon] panel-state 写入失败:', e.message); }
+ if (!found) return { success: true, content: '台风面板当前没有打开，无需关闭。' };
  return { success: true, content: '台风面板已关闭。' };
  }
  try {
@@ -143,6 +154,8 @@ registry.register({
  data,
  intent: 'inform',
  });
+ // 2026-09-25: 打开态写入 panel-state(此前漏写 → 注入侧台风状态恒 stale)
+ try { setPanelState('typhoon', 'open'); } catch (e) { console.warn('[ShowTyphoon] panel-state 写入失败:', e.message); }
  return { success: true, content: panels.typhoon.render(data), data };
  } catch (e) {
  // 2026-08-15: "暂无活跃台风"不是失败——面板以空态打开(用户可见面板存在
@@ -154,6 +167,7 @@ registry.register({
  data: emptyData,
  intent: 'inform',
  });
+ try { setPanelState('typhoon', 'open'); } catch (e2) { console.warn('[ShowTyphoon] panel-state 写入失败:', e2.message); }
  return { success: true, content: e.message, data: emptyData };
  }
  return { success: false, error: `获取台风数据失败: ${e.message}` };

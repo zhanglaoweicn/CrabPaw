@@ -301,7 +301,7 @@ const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const toolSystem = registry;
 
 // Harness v2: Tool Contract + Hooks integration
-const { registerIntoRegistry: registerToolContracts } = require('./tool-contract');
+const { registerIntoRegistry: registerToolContracts, getToolContract } = require('./tool-contract');
 const { globalHooks, HookManager } = require('./harness-hooks');
 
 registerToolContracts(toolSystem);
@@ -928,7 +928,7 @@ async function executeToolCall(toolCall) {
  }
 }
 
-const { parseDSMLToolCalls, stripDSMLTags } = require('./ai/dsml');
+const { parseDSMLToolCalls, stripDSMLTags, getMissingRequiredParams } = require('./ai/dsml');
 
 function processSkillArguments(skills, userMessage) {
  return skills.map(skill => {
@@ -2302,7 +2302,63 @@ const emptyResults = toolResults.filter(
  if (hasFailedResults) {
  console.log('⚠️ 已有工具结果包含错误，尝试重新执行 DSML 工具调用');
  }
- for (const call of dsmlCalls) {
+ // 2026-09-24 实测修复: DSML 调用缺必填参数（实测"关闭台风卡"时模型发出
+ // `<...invoke name="ShowTyphoon">` 空参数调用，旧解析器连空参调用一起丢弃
+ // → 整轮 0 次工具调用空转，卡片纹丝不动）。现在缺参调用先给模型一次
+ // 自修正机会（带缺失明细+枚举可选值），修正成功照常执行；仍无效则把
+ // 缺什么如实写进结果，由收尾话术明确告知用户，而不是无声蒸发。
+ let callsToExecute = dsmlCalls.filter((c) => getMissingRequiredParams(c.name, c.params).length === 0);
+ const invalidDsmlCalls = dsmlCalls.filter((c) => getMissingRequiredParams(c.name, c.params).length > 0);
+ if (invalidDsmlCalls.length > 0) {
+ console.warn(`⚠️ [DSML] ${invalidDsmlCalls.length} 个调用缺必填参数，尝试自修正一次:`,
+ invalidDsmlCalls.map((c) => `${c.name} 缺 ${getMissingRequiredParams(c.name, c.params).join('/')}`).join('; '));
+ try {
+ // 2026-09-24 二次修复: 自修正弃用"求模型吐 DSML 文本"——实测模型回的是
+ // 分析散文, 解析不出调用(用户听到元解释、卡片照旧不弹)。改用原生
+ // function calling: tools 注入契约 schema + tool_choice 强制调用, 返回
+ // 结构化 JSON 参数, 不依赖模型遵循输出格式。
+ const repairResp = await fetchWithRetry(`${baseUrl}/chat/completions`, {
+ method: 'POST',
+ signal: interruptSignal,
+ headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+ body: JSON.stringify({
+ model: model,
+ messages: [
+ { role: 'system', content: '用户刚才的工具调用缺少参数。请根据用户意图重新调用工具并填全参数。' },
+ { role: 'user', content: `用户请求：${message}\n\n模型刚才的调用缺少参数：\n${invalidDsmlCalls.map((c) => `- ${c.name}: ${getMissingRequiredParams(c.name, c.params).join('、')}`).join('\n')}\n\n请重新调用正确的工具并填全参数。` },
+ ],
+ tools: invalidDsmlCalls.map((c) => {
+ const contract = getToolContract(c.name);
+ return { type: 'function', function: { name: c.name, description: (contract && contract.description) || c.name, parameters: (contract && contract.schema) || { type: 'object', properties: {} } } };
+ }),
+ tool_choice: 'required',
+ temperature: 0.2,
+ max_tokens: 1024,
+ }),
+ });
+ const repairData = await repairResp.json();
+ const repairToolCalls = repairData?.choices?.[0]?.message?.tool_calls || [];
+ const repairedCalls = [];
+ for (const tcall of repairToolCalls) {
+ const fname = tcall?.function?.name;
+ if (!fname) continue;
+ let repairArgs = {};
+ try { repairArgs = JSON.parse(tcall.function.arguments || '{}'); } catch (e) { console.warn('[DSML] 自修正参数 JSON 解析失败:', e.message); }
+ repairedCalls.push({ name: fname, params: repairArgs });
+ }
+ const repairedValid = repairedCalls.filter((c) => getMissingRequiredParams(c.name, c.params).length === 0);
+ if (repairedValid.length > 0) {
+ console.log('✅ [DSML] 自修正成功:', repairedValid.map((c) => `${c.name}(${Object.keys(c.params).join(',')})`).join('; '));
+ callsToExecute = callsToExecute.concat(repairedValid);
+ }
+ } catch (e) {
+ console.warn('[DSML] 自修正调用失败:', e.message);
+ }
+ if (callsToExecute.length === 0) {
+ allResultsContent += invalidDsmlCalls.map((c) => `【工具: ${c.name}】调用失败: 缺少必填参数 ${getMissingRequiredParams(c.name, c.params).join('、')}`).join('\n') + '\n\n';
+ }
+ }
+ for (const call of callsToExecute) {
  try {
  const result = await executeToolCall({ name: call.name, params: call.params });
  console.log('📊 DSML 工具结果:', result.success ? '成功' : result.error);
@@ -2546,7 +2602,63 @@ const failedToolNames = [];
  if (hasFailedResults) {
  console.log('⚠️ 已有工具结果包含错误，尝试重新执行 DSML 工具调用');
  }
- for (const call of dsmlCalls) {
+ // 2026-09-24 实测修复: DSML 调用缺必填参数（实测"关闭台风卡"时模型发出
+ // `<...invoke name="ShowTyphoon">` 空参数调用，旧解析器连空参调用一起丢弃
+ // → 整轮 0 次工具调用空转，卡片纹丝不动）。现在缺参调用先给模型一次
+ // 自修正机会（带缺失明细+枚举可选值），修正成功照常执行；仍无效则把
+ // 缺什么如实写进结果，由收尾话术明确告知用户，而不是无声蒸发。
+ let callsToExecute = dsmlCalls.filter((c) => getMissingRequiredParams(c.name, c.params).length === 0);
+ const invalidDsmlCalls = dsmlCalls.filter((c) => getMissingRequiredParams(c.name, c.params).length > 0);
+ if (invalidDsmlCalls.length > 0) {
+ console.warn(`⚠️ [DSML] ${invalidDsmlCalls.length} 个调用缺必填参数，尝试自修正一次:`,
+ invalidDsmlCalls.map((c) => `${c.name} 缺 ${getMissingRequiredParams(c.name, c.params).join('/')}`).join('; '));
+ try {
+ // 2026-09-24 二次修复: 自修正弃用"求模型吐 DSML 文本"——实测模型回的是
+ // 分析散文, 解析不出调用(用户听到元解释、卡片照旧不弹)。改用原生
+ // function calling: tools 注入契约 schema + tool_choice 强制调用, 返回
+ // 结构化 JSON 参数, 不依赖模型遵循输出格式。
+ const repairResp = await fetchWithRetry(`${baseUrl}/chat/completions`, {
+ method: 'POST',
+ signal: interruptSignal,
+ headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+ body: JSON.stringify({
+ model: model,
+ messages: [
+ { role: 'system', content: '用户刚才的工具调用缺少参数。请根据用户意图重新调用工具并填全参数。' },
+ { role: 'user', content: `用户请求：${message}\n\n模型刚才的调用缺少参数：\n${invalidDsmlCalls.map((c) => `- ${c.name}: ${getMissingRequiredParams(c.name, c.params).join('、')}`).join('\n')}\n\n请重新调用正确的工具并填全参数。` },
+ ],
+ tools: invalidDsmlCalls.map((c) => {
+ const contract = getToolContract(c.name);
+ return { type: 'function', function: { name: c.name, description: (contract && contract.description) || c.name, parameters: (contract && contract.schema) || { type: 'object', properties: {} } } };
+ }),
+ tool_choice: 'required',
+ temperature: 0.2,
+ max_tokens: 1024,
+ }),
+ });
+ const repairData = await repairResp.json();
+ const repairToolCalls = repairData?.choices?.[0]?.message?.tool_calls || [];
+ const repairedCalls = [];
+ for (const tcall of repairToolCalls) {
+ const fname = tcall?.function?.name;
+ if (!fname) continue;
+ let repairArgs = {};
+ try { repairArgs = JSON.parse(tcall.function.arguments || '{}'); } catch (e) { console.warn('[DSML] 自修正参数 JSON 解析失败:', e.message); }
+ repairedCalls.push({ name: fname, params: repairArgs });
+ }
+ const repairedValid = repairedCalls.filter((c) => getMissingRequiredParams(c.name, c.params).length === 0);
+ if (repairedValid.length > 0) {
+ console.log('✅ [DSML] 自修正成功:', repairedValid.map((c) => `${c.name}(${Object.keys(c.params).join(',')})`).join('; '));
+ callsToExecute = callsToExecute.concat(repairedValid);
+ }
+ } catch (e) {
+ console.warn('[DSML] 自修正调用失败:', e.message);
+ }
+ if (callsToExecute.length === 0) {
+ allResultsContent += invalidDsmlCalls.map((c) => `【工具: ${c.name}】调用失败: 缺少必填参数 ${getMissingRequiredParams(c.name, c.params).join('、')}`).join('\n') + '\n\n';
+ }
+ }
+ for (const call of callsToExecute) {
  try {
  const result = await executeToolCall({ name: call.name, params: call.params });
  console.log('📊 DSML 工具结果:', result.success ? '成功' : result.error);
@@ -4400,6 +4512,7 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
  const errName = streamError?.name || '';
  const errCode = streamError?.code || '';
  const errMsg = streamError?.message || '';
+ let streamFailure = streamError; // 重试仍失败时更新(不直接赋 catch 参数, no-ex-assign)
  const isAbort = errName === 'AbortError' || errCode === 'ERR_ABORTED' || /aborted/i.test(errMsg);
  if (isAbort) {
    console.log('ℹ️ [流式] 流被中断(abort),正常结束');
@@ -4408,15 +4521,38 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
    onChunk({ type: 'interrupted', content: '', done: true });
    return '';
  }
- console.error('❌ [流式] 未捕获异常:', streamError.message);
- const fallbackMsg = '抱歉，对话过程中遇到了问题。请尝试重新描述您的需求，或稍后重试。';
- onChunk({ content: fallbackMsg, done: true });
- // 2026-08-15 P2-5: 失败路径轨迹落 failed_trajectories.jsonl——此前 save 恒
- // completed=true, failed_trajectories.jsonl 永不写入。
- try {
- globalTrajectorySaver.save(compressedMessages.concat([{ role: 'assistant', content: fallbackMsg }]), model, false);
- } catch (e) { console.warn('[ai] 保存失败轨迹异常:', e.message); }
- return fallbackMsg;
+ // 2026-09-24 实测修复②: 纯对话流(本轮零工具调用)遇网络型瞬断(实测
+ // "terminated"——模型 API 响应流中途断线)自动重试一次; 有工具调用的回合
+ // 不盲目重试,避免副作用类工具(发消息/写文件)被重复执行。
+ const isTransientStreamError = /terminated|econnreset|socket hang up|epipe|etimedout|network/i.test(errMsg) || errCode === 'ECONNRESET';
+ if (isTransientStreamError && streamTotalToolCalls === 0) {
+   console.warn('🔁 [流式] 网络型流中断(本轮无工具调用), 自动重试一次');
+   try {
+     streamResult = await processWithStreaming(compressedMessages);
+   } catch (retryError) {
+     streamFailure = retryError; // 重试仍失败 → 走下方统一错误处理
+   }
+ }
+ if (!streamResult) {
+   // 2026-09-24 实测修复①: 本轮工具已成功执行时, 收尾流断线不应报错——
+   // 任务实际已完成(实测: 台风卡已关闭成功, 用户却看到"出错了, 请重试")。
+   // 与上方"空回复但工具成功"的修法同一哲学: 工具成功即任务完成。
+   const okLines = (runToolDigest || '').split('\n').filter((l) => l.includes('[ok]')).join('\n').trim();
+   if (okLines) {
+     console.warn('[流式] 收尾流异常但本轮工具已成功执行——按已完成收尾:', okLines.substring(0, 200));
+     onChunk({ content: `已完成。\n${okLines}`, done: true });
+     return `已完成。\n${okLines}`;
+   }
+   console.error('❌ [流式] 未捕获异常:', streamFailure.message);
+   const fallbackMsg = '抱歉，对话过程中遇到了问题。请尝试重新描述您的需求，或稍后重试。';
+   onChunk({ content: fallbackMsg, done: true });
+   // 2026-08-15 P2-5: 失败路径轨迹落 failed_trajectories.jsonl——此前 save 恒
+   // completed=true, failed_trajectories.jsonl 永不写入。
+   try {
+   globalTrajectorySaver.save(compressedMessages.concat([{ role: 'assistant', content: fallbackMsg }]), model, false);
+   } catch (e) { console.warn('[ai] 保存失败轨迹异常:', e.message); }
+   return fallbackMsg;
+ }
  }
  // 兼容：processWithStreaming 可能返回字符串（降级路径）或对象（正常路径）
  const fullContent = typeof streamResult === 'string' ? streamResult : (streamResult?.content || '');
@@ -4443,6 +4579,15 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
    break;
  }
  const dsmlToolId = 'dsml_' + tc.name + '_' + Date.now();
+ // 2026-09-24: 缺必填参数的 DSML 调用不再盲目执行——解析器修复后空参/缺参
+ // 调用会透到这里，执行必被契约钩子拦下。显式跳过并给用户可读原因。
+ const dsmlMissing = getMissingRequiredParams(tc.name, tc.params || tc.arguments);
+ if (dsmlMissing.length > 0) {
+ console.warn(`[DSML兜底] ${tc.name} 缺必填参数 ${dsmlMissing.join('、')}，跳过执行`);
+ onChunk({ type: 'thinking', content: `⚠️ ${tc.name} 缺少必填参数（${dsmlMissing.join('、')}），已跳过该调用` });
+ dsmlFailedResults.push({ name: tc.name, error: `缺少必填参数: ${dsmlMissing.join('、')}` });
+ continue;
+ }
     onChunk({ type: 'tool_call', toolName: tc.name, toolId: dsmlToolId, toolArgs: JSON.stringify(tc.params || tc.arguments) });
  try {
  onChunk({ type: 'thinking', content: `⏳ 正在执行 ${tc.name}...` });

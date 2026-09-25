@@ -920,6 +920,16 @@ export function TyphoonPanel() {
       setDismissed(false)
       closedRef.current = false // 2026-08-15: 新一轮推送 → 允许刷新
     }
+    // 2026-09-25 外部关闭同步: surface 被后端删除(语音 hide/启动清理/其他端)时,
+    // 语音显隐路径必须同步消失——此前 voiceVisible 单独撑着已删 surface 的卡,
+    // 后端"已关闭"、屏上卡还在("说关了没关"的鬼卡根因之一)。scene-client 的
+    // remove 路径会把 null 通知到本订阅, 这里据此收卡; 用户手点关闭(handleClose)
+    // 已置 closedRef, 无需重复处理。
+    if (!surface && prevSceneRef.current && !closedRef.current) {
+      setVoiceVisible(false)
+      setHistoryOpen(false)
+      setHistoryData(null)
+    }
     prevSceneRef.current = !!surface
   }, [surface])
   const visible = (voiceVisible || !!surface) && !dismissed

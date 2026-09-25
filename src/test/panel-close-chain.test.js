@@ -38,6 +38,9 @@ jest.mock('../core/panels', () => ({
   },
   typhoon: {
     getTyphoon: jest.fn(async () => ({ list: [], active: null, updatedAt: new Date().toISOString() })),
+    // 2026-09-25: 补 render mock——台风关闭链测试的 show 用例会走 handler 的
+    // render(data), 不 mock 会 TypeError 落入失败分支
+    render: jest.fn(() => ''),
   },
 }));
 
@@ -305,5 +308,46 @@ describe('面板状态 open 对称（2026-08-29 Task 9）', () => {
     await handlePanelApi(req, res, '/panels/stock');
     expect(res.statusCode).toBe(200);
     expect(getPanelState().stock).toBe('open');
+  });
+});
+
+// ─── 台风面板关闭链路（2026-09-24 实机"说关了没关"回归）───
+// 实机: 21:52 hide 执行成功回"已关闭"而卡在屏上——hide 无条件报成功 +
+// show/hide 不写 panel-state + 前端 voiceVisible 撑鬼卡, 三处收口。
+describe('台风面板关闭链路（2026-09-24 假成功收口）', () => {
+  test('action=hide 移除 typhoon-panel surface 并记录 closed 面板状态', async () => {
+    const { getSceneStore } = require('../core/scene/scene-store');
+    const { getPanelState } = require('../core/panel-state');
+    const store = getSceneStore();
+    // 先构造"面板已打开"状态
+    store.upsertSurface('typhoon-panel', { kind: 'typhoon', data: { name: '测试台风' }, intent: 'inform' });
+    expect(store.getSnapshot().surfaces.some(s => s.id === 'typhoon-panel')).toBe(true);
+
+    const tool = registry.get('ShowTyphoon');
+    const res = await tool.handler({ action: 'hide' }, {});
+    expect(res.success).toBe(true);
+    // surface 已移除 → 前端 useSceneClient 收 null → 面板关闭
+    expect(store.getSnapshot().surfaces.some(s => s.id === 'typhoon-panel')).toBe(false);
+    // panel-state 记录 closed（此前 typhoon show/hide 均不写, AI 上下文跟踪失真）
+    expect(getPanelState().typhoon).toBe('closed');
+  });
+
+  test('action=hide surface 本就不存在 → 如实告知"没有打开"（不凭空声称已关闭）', async () => {
+    const { getSceneStore } = require('../core/scene/scene-store');
+    const store = getSceneStore();
+    store.removeSurface('typhoon-panel'); // 确保不存在（幂等, found:false 静默）
+    const tool = registry.get('ShowTyphoon');
+    const res = await tool.handler({ action: 'hide' }, {});
+    expect(res.success).toBe(true);
+    expect(res.content).toContain('没有打开');
+    expect(res.content).not.toContain('已关闭');
+  });
+
+  test('action=show 打开面板 → panel-state typhoon=open（此前漏写, 注入状态恒 stale）', async () => {
+    const { getPanelState } = require('../core/panel-state');
+    const tool = registry.get('ShowTyphoon');
+    const res = await tool.handler({ action: 'show' }, {});
+    expect(res.success).toBe(true);
+    expect(getPanelState().typhoon).toBe('open');
   });
 });

@@ -637,11 +637,31 @@ let rendererCrashCount = 0
 const MAX_RENDERER_CRASH_RECOVERY = 10
 let lastCrashTime = 0
 
+// 2026-09-25: 渲染层 console 落盘(排障)——此前仅转发主进程 stdout, 用户手动启动
+// GUI 时 stdout 在终端里, 事后无法取证(PTT/面板类偶发问题的排查切口)。单文件
+// 追加写, 超 10MB 重建, 失败静默降级不影响主流程。
+let rendererLogStream: ReturnType<typeof fs.createWriteStream> | null = null
+function appendRendererLog(logLine: string) {
+  try {
+    if (!rendererLogStream) {
+      const file = path.join(DATA_DIR, 'renderer-console.log')
+      try {
+        if (fs.existsSync(file) && fs.statSync(file).size > 10 * 1024 * 1024) fs.unlinkSync(file)
+      } catch (e) { /* 截断失败不阻塞 */ }
+      rendererLogStream = fs.createWriteStream(file, { flags: 'a' })
+      rendererLogStream.on('error', () => { rendererLogStream = null })
+    }
+    rendererLogStream.write(logLine)
+  } catch (e) { /* 日志落盘失败不影响主流程 */ }
+}
+
 function setupCrashRecovery(webContents: any) {
   // 2026-08-01: 渲染进程 console 转发（诊断）——React hooks 错误等组件栈可在此捕获
   webContents.on('console-message', (_event: any, level: number, message: string, line: number, sourceId: string) => {
     // [DIAG-2026-08-08] 临时:放开过滤转发全部渲染层日志(抓 TTS paused 根因),排障后恢复 level>=2 || /hooks|ErrorBoundary|error/
     if (level >= 1 || /hooks|ErrorBoundary|error/i.test(message)) {
+      // 2026-09-25: 同步落盘(同一过滤口径)
+      appendRendererLog(`${new Date().toISOString()} [renderer:${level}] ${message} (${sourceId}:${line})\n`)
       console.log(`[renderer:${level}] ${message} (${sourceId}:${line})`)
     }
   })
@@ -753,7 +773,11 @@ function setupCrashRecovery(webContents: any) {
     })
     mainWindow.webContents.on('did-finish-load', () => { prodLoadFailCount = 0 })
     mainWindow.webContents.on('console-message', (_e, level, message) => {
-      if (level >= 2) console.error(`[RENDERER] ${message}`) // warn and error levels
+      if (level >= 2) {
+        // 2026-09-25: 打包版渲染层 warn/error 同步落盘(与 dev 口径一致的取证通道)
+        appendRendererLog(`${new Date().toISOString()} [renderer:${level}] ${message}\n`)
+        console.error(`[RENDERER] ${message}`) // warn and error levels
+      }
     })
   }
 

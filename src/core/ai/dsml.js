@@ -17,7 +17,11 @@
 function parseDSMLToolCalls(text) {
   const results = [];
 
-  const invokeRegex = /<[｜|]+DSML[｜|]+invoke\s+name="([^"]+)">([\s\S]*?)<\/[｜|]+DSML[｜|]+invoke>/g;
+  // 2026-09-24 实测修复: 竖线组与标签名之间允许空白——DeepSeek 实测输出
+  // `<｜｜DSML｜｜ invoke name="ShowTyphoon">`（｜｜ 与 invoke 间有空格），
+  // 旧正则 [｜|]+DSML[｜|]+invoke 不容空白 → 整个调用解析不到 → 被当纯文本
+  // 放行，"关闭台风卡"整轮空转（trajectory 0 次工具调用）。
+  const invokeRegex = /<[｜|]+\s*DSML\s*[｜|]+\s*invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\s*\/\s*[｜|]+\s*DSML\s*[｜|]+\s*invoke\s*>/g;
   let invokeMatch;
 
   while ((invokeMatch = invokeRegex.exec(text)) !== null) {
@@ -25,7 +29,7 @@ function parseDSMLToolCalls(text) {
     const paramsBlock = invokeMatch[2];
 
     const params = {};
-    const paramRegex = /<[｜|]+DSML[｜|]+parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/[｜|]+DSML[｜|]+parameter>/g;
+    const paramRegex = /<[｜|]+\s*DSML\s*[｜|]+\s*parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\s*\/\s*[｜|]+\s*DSML\s*[｜|]+\s*parameter\s*>/g;
     let paramMatch;
 
     while ((paramMatch = paramRegex.exec(paramsBlock)) !== null) {
@@ -79,23 +83,24 @@ function parseDSMLToolCalls(text) {
       params[paramName] = paramValue;
     }
 
-    if (Object.keys(params).length > 0) {
-      // 参数名兼容：部分模型用 path，部分用 file_path
-      if (name === 'Read' && params.path && !params.file_path) {
-        params.file_path = params.path;
-        delete params.path;
-      }
-      if (name === 'Write' && params.path && !params.file_path) {
-        params.file_path = params.path;
-        delete params.path;
-      }
-      if (name === 'LS' && params.file_path && !params.path) {
-        params.path = params.file_path;
-        delete params.file_path;
-      }
-
-      results.push({ name, params });
+    // 2026-09-24 实测修复: 空参数调用不再静默丢弃——旧逻辑 params 为空直接跳过，
+    // 模型"发了调用但没填参数"时整个调用蒸发（连失败反馈都没有）。现一律透出，
+    // 由消费方（ai.js）按契约校验：缺必填参数 → 走自修正/诚实失败路径，而不是蒸发。
+    // 参数名兼容：部分模型用 path，部分用 file_path
+    if (name === 'Read' && params.path && !params.file_path) {
+      params.file_path = params.path;
+      delete params.path;
     }
+    if (name === 'Write' && params.path && !params.file_path) {
+      params.file_path = params.path;
+      delete params.path;
+    }
+    if (name === 'LS' && params.file_path && !params.path) {
+      params.path = params.file_path;
+      delete params.file_path;
+    }
+
+    results.push({ name, params });
   }
 
   if (results.length > 0) {
@@ -133,7 +138,44 @@ function stripDSMLTags(text) {
   return cleaned.trim();
 }
 
+/**
+ * 检查一次解析出的调用是否"参数不完整"（对照工具契约）。
+ * 两种情形都算不完整：
+ *   ① 缺必填参数（required 未给）；
+ *   ② 零参数调用但契约本有参数可填——实测陷阱：ShowTyphoon 的 action 默认
+ *      show，模型发空调用会被当 show 执行把面板"刷开"，与用户"关闭"意图相反。
+ * 契约不存在或读取失败时按"完整"处理（交由执行层的契约钩子兜底）。
+ * 返回不完整项的可读描述数组（带枚举可选值提示），空数组 = 可直接执行。
+ */
+function getMissingRequiredParams(toolName, params) {
+  try {
+    const { getToolContract } = require('../tool-contract');
+    const contract = typeof getToolContract === 'function' ? getToolContract(toolName) : null;
+    if (!contract || !contract.schema) return [];
+    const props = contract.schema.properties || {};
+    const src = params && typeof params === 'object' ? params : {};
+    const required = Array.isArray(contract.schema.required) ? contract.schema.required : [];
+    const missing = required
+      .filter((k) => {
+        const v = src[k];
+        return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
+      })
+      .map((k) => {
+        const p = props[k] || {};
+        return Array.isArray(p.enum) ? `${k}（可选值: ${p.enum.join(' / ')}）` : k;
+      });
+    const propKeys = Object.keys(props);
+    if (missing.length === 0 && propKeys.length > 0 && Object.keys(src).length === 0) {
+      missing.push(`该调用没有任何参数（该工具的参数: ${propKeys.slice(0, 4).join('、')}${propKeys.length > 4 ? ' 等' : ''}）`);
+    }
+    return missing;
+  } catch (e) {
+    return [];
+  }
+}
+
 module.exports = {
   parseDSMLToolCalls,
   stripDSMLTags,
+  getMissingRequiredParams,
 };

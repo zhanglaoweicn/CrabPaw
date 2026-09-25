@@ -67,17 +67,35 @@ const INTENT_TOOLSETS = {
  },
 
  // ── 信息查询 ──
+ // 2026-09-24 实机修复: 面板开关意图——"关闭卡片/关闭面板"不含任何话题词(台风/股票…),
+ // 落 general(0.5) 后 panel 集不注入 → 模型看不到 ShowTyphoon 等面板工具,
+ // 只能抓 SceneClear/ControlUI 这些"看着像"的工具(实测三连: 嘴上已关闭×2,
+ // 卡片纹丝不动)或 DSML 硬吐。pairs 让"关闭/打开/收起 + 卡片/面板"组合命中
+ // 2-3 次(2/2+0.2=1.2), 必压 general 0.5; 话题意图(weather/stock 等)分数更高
+ // 时不抢("打开天气面板"仍走 weather)。required=panel: Show* 家族全部可见,
+ // 由模型按上下文选对面板并填 action=show/hide。
+ panel_control: {
+ required: ['panel'],
+ optional: ['scene', 'memory', 'system'],
+ keywords: ['关闭卡片', '打开卡片'],
+ pairs: [['关闭', '卡片'], ['关闭', '面板'], ['打开', '卡片'], ['打开', '面板'], ['收起', '卡片'], ['收起', '面板'], ['关掉', '卡片'], ['关掉', '面板'], ['弹出', '卡片'], ['弹出', '面板']],
+ },
+
  // 2026-08-18 实机修复: 台风独立意图——此前台风问题落 weather 集（keywords 含"台风"）
  // → 模型调 TyphoonQuery 发 'typhoon' 窗口内小卡。台风命中 1/3=0.43 > weather 0.19 →
  // 注入 panel 集（含 ShowTyphoon），台风问题走 typhoon-panel 大面板（与"打开台风"一致）。
+ // 2026-09-24 实机修复: keywords 3→2（去掉英文 typhoon）——单关键词命中得分
+ // =1/N+0.1, N=3 时 0.433 < general 兜底 0.5 →「明天有台风吗」等口语问法全部
+ // 落 general、panel 集不注入、模型看不到 ShowTyphoon（实机: 只播声音不弹卡）。
+ // N=2 时单命中 0.6 > 0.5。英文 typhoon 语料罕见, 牺牲可接受。
  typhoon: {
  required: ['panel'],
  // 2026-08-25 防分支: optional 原含 'web'——TyphoonQuery(web 集)随意图注入后,
  // 模型倾向先调数据工具而非面板工具(00:22 实机「最近有台风吗」→ 不弹台风卡、
  // 顺带补调 ShowWeather)。台风面板数据由 ShowTyphoon handler 自取, 无需暴露数据工具。
  optional: ['memory', 'system'],
- keywords: ['台风', '飓风', 'typhoon'],
- },
+ keywords: ['台风', '飓风'],
+},
  weather: {
  required: ['web', 'panel'],
  optional: ['memory', 'system'],

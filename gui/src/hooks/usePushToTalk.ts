@@ -629,6 +629,17 @@ export function usePushToTalk(options: UsePushToTalkOptions = {}): UsePushToTalk
           if (abort.signal.aborted) { node2.disconnect(); stream2.getTracks().forEach(t => t.stop()); return }
           captureNodeRef.current = node2
           console.log('[PTT] 静音流自愈完成,采集链已重建')
+          // 2026-09-25 PTT 死按兜底: 自愈重开后(按下起 1.5s)仍全程零电平 → 麦克风
+          // 被占用/独占失败, 不再无声无息——经 onError 上报(VoiceIntegration 现已
+          // 转发 crabpaw:voice-error → toast+播报)。
+          setTimeout(() => {
+            try {
+              if (!recordingRef.current || abort.signal.aborted) return
+              if (lastLoudTsRef.current !== 0) return // 有电平=流健康
+              console.warn('[PTT] 自愈重开后仍零电平(按住1.5s)——上报可见错误')
+              onError?.('按住说话没有录到声音：麦克风可能被其他程序占用，请检查后重试')
+            } catch (e2: any) { console.warn('[PTT] dead-hold 检查失败:', e2?.message) }
+          }, 900).unref?.()
         } catch (e: any) {
           console.warn('[PTT] 静音流自愈失败(继续原链):', e?.message || e)
         }

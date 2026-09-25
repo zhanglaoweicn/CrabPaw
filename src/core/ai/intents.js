@@ -9,9 +9,15 @@
 
 // 意图模式列表：每个意图含正则数组、提示词、关联工具
 const INTENT_PATTERNS = [
+  // 2026-09-24 实机修复: 面板开关提示——"关闭卡片"类请求此前无任何提示,
+  // 模型只在文字里声称"已关闭"而不调用工具(实测三连), 或抓 SceneClear/ControlUI
+  // 错工具。显式提示: 必须调用对应 Show* 工具真实执行, action 按意图填。
+  { patterns: [/(关闭|打开|弹出|收起|关掉)[^。]{0,8}(卡片|面板|弹窗)/i], hint: '用户要求打开/关闭/收起某张卡片或面板——必须调用对应的 Show* 面板工具真实执行（展示/询问类 action="show"，要求关闭/收起 action="hide"）；哪个面板依据对话上下文判断（如台风卡=ShowTyphoon）。严禁只在文字里声称"已关闭/已打开"而不调用工具。', tool: null },
   // 2026-08-14: 台风意图置于天气之前——"台风天气/台风路径"优先走台风追踪面板
   // 2026-08-25 强化版: 台风问题面板独占——禁止文字/ShowStock/ShowWeather/仅数据工具代替
-  { patterns: [/台风|飓风|typhoon|hurricane/i], hint: '用户询问台风/台风路径/台风预警——必须调用 ShowTyphoon(action="show") 弹出台风面板(轨迹地图/风圈/登陆点)。严禁用文字回复替代, 严禁调用 ShowStock/ShowWeather 或只调 TyphoonQuery(数据查询不能代替面板展示)。数据来自政府实时发布系统, 暂不可用时如实告知并建议官方渠道, 不得虚构。', tool: 'ShowTyphoon' },
+  // 2026-09-24 修正: action 不再硬编码 show——"关闭台风卡"含"台风"也会命中本条,
+  // 旧文案"必须 action=show"会逆用户关闭意图(实机陷阱: 空参数调用被默认 show 刷开面板)。
+  { patterns: [/台风|飓风|typhoon|hurricane/i], hint: '用户询问台风/台风路径/台风预警——调用 ShowTyphoon 弹出台风面板(轨迹地图/风圈/登陆点)，action 按用户意图填：询问/查看/展示=show，要求关闭/收起=hide。严禁用文字回复替代, 严禁调用 ShowStock/ShowWeather 或只调 TyphoonQuery(数据查询不能代替面板展示)。数据来自政府实时发布系统, 暂不可用时如实告知并建议官方渠道, 不得虚构。', tool: 'ShowTyphoon' },
   { patterns: [/天气|weather|温度|气温|下雨|下雪|晴|阴/, /wttr/i], hint: '用户查询天气，调用 ShowWeather(city="城市名")。会以可视卡片形式展示在右上角。不要只用文字回复天气——调工具显示卡片才是用户期望的体验。', tool: 'ShowWeather' },
   { patterns: [/音乐|放首歌|听歌|播放|歌曲|唱首歌|来首歌|推荐音乐|music|song/i], hint: '用户想要听音乐，请使用 Music( action="search" ) 工具搜索并播放音乐。如果需要控制（暂停/下一首/关闭），使用 Music(action="stop"|"pause"|"next")。推荐优先使用统一的 Music 工具替代独立的 MusicSearch/PlayMusic/MusicControl。', tool: 'Music' },
   { patterns: [/股票|行情|涨跌|股价|A股|港股|美股|基金|指数|K线|市盈率/], hint: '用户询问股票行情/大盘/股价，先调用 ShowStock(queries="股票名") 展示行情面板（实时行情列表+K线+大盘指数）；用户要求深度分析（估值/动量/风险/建议）时再用 StockQuery 工具', tool: 'StockQuery' },

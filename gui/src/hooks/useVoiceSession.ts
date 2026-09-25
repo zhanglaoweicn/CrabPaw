@@ -272,6 +272,9 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
   // lastWarnedOfflineTs 距上次离线报警 >10s(连续不在线才累加 attempts,防短暂抖动刷爆)
   const lastListenReconnectTsRef = useRef(0)
   const lastWarnedOfflineTsRef = useRef(0)
+  // 2026-09-24: RT 下行活性——收到豆包任意帧(音频/事件/转写)即刷新。
+  // 实时通道 watchdog 用它判"半开假活"(WS OPEN 但对端已死), 见 watchdog 内注释。
+  const lastRtInboundTsRef = useRef(0)
 
   // ── 状态更新辅助 ──
   // 2026-08-04: P4 状态转换守卫(移植 LiveKit 状态机思想,轻量版)
@@ -847,6 +850,8 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
 
     ws.onmessage = (ev) => {
       if (asrWsRef.current !== ws) return
+      // 2026-09-24: 刷新 RT 下行活性(半开假活自愈判据, 见 watchdog 实时通道分支)
+      lastRtInboundTsRef.current = Date.now()
       handleAsrMessage(ev)
     }
 
@@ -928,6 +933,8 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
           }
           reconnectBufferRef.current = []
         }
+        // 2026-09-24: 下行活性计时起点(半开假活自愈判据)
+        lastRtInboundTsRef.current = Date.now()
       }, true) // useReconnectGuard=true：使用重连计数器+MAX_RECONNECT_ATTEMPTS
     } catch (e) {
       console.error('[ASR] WebSocket connect error:', e)
@@ -1299,10 +1306,28 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
         return
       }
       const now = Date.now()
-      // 2026-09-17: 实时通道跳过 stalled 强拆——实时模型出转写/开口本来就有秒级
+      // 2026-09-17: 实时通道跳过 classic 的 stalled 强拆——实时模型出转写/开口本来就有秒级
       // 思考停顿,classic 的"有声但无转写→强拆"会误杀正常思考中的会话(整轮丢失)。
       // 断线恢复由上方 not-OPEN 分支 + onclose 重连链承担。
-      if (dialogChannelRef.current === 'realtime') return
+      // 2026-09-24 实测修复: 实时通道自有的"半开假活"自愈——后端被强杀/崩溃时发不出
+      // WS 关闭帧,客户端 readyState 恒 OPEN 但对端已死: 说话照采照发、永不触发
+      // onclose 重连,而重连预算已在重启风暴中耗尽 → 永久聋哑(实测: 重启风暴后
+      // 实时语音不出声)。自愈判据用下行活性而非转写(播报中转写本来就没有,而
+      // 播报中下行音帧连续, 不会误伤): 最近 60s 内用户开过口、且已停口 >3s,
+      // 但豆包下行 >20s 无任何帧 → 强拆重连(reconnectBuffer 补发不丢音频)。
+      if (dialogChannelRef.current === 'realtime') {
+        const spokeRecently = now - lastLoudTsRef.current < 60000
+        const stoppedSpeaking = now - lastLoudTsRef.current > 3000
+        const sinceInbound = now - lastRtInboundTsRef.current
+        if (spokeRecently && stoppedSpeaking && sinceInbound > 20000 && !reconnectScheduledRef.current) {
+          console.warn('[VoiceSession] RT 半开假活自愈: 用户已说话但豆包下行 ' + Math.round(sinceInbound / 1000) + 's 无帧 → 强制重连')
+          lastRtInboundTsRef.current = now // 防重连窗口内重复触发
+          reconnectScheduledRef.current = true
+          try { ws.close() } catch { console.warn('[ASR] WS 关闭失败(ws already closing)') }
+          setTimeout(() => { reconnectScheduledRef.current = false }, RECONNECT_RESET_WINDOW_MS)
+        }
+        return
+      }
       // R21: 1200→3000——用户说完话后 1.2s 内没音量就判"不活跃"太敏感,
       // 配合 8s stalled 窗口,只在真正长时间无响应时才重连。
       const loudRecently = now - lastLoudTsRef.current < 3000

@@ -12,6 +12,11 @@
 *.keystore
 .api_token
 .api_port
+# 2026-09-25: 密钥备份/残留变体——原规则是精确名匹配, 拦不住诊断目录里的备份副本
+# (cdp-diag/api_keys.clobbered-backup.json、keystore.current-backup.bin 此前仅靠
+# "碰巧未跟踪" 而安全, 一次 git add -A 就会推上公开仓)
+*api_keys*.json
+*keystore*.bin
 
 # 评测运行时产物
 boss_profile_eval_*.json

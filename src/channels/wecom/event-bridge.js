@@ -23,6 +23,11 @@ const MESSAGE_BUFFER_TTL = 3000;
 
 const messageBuffer = new Map();
 
+// 2026-09-24: 桥内不做进程清扫——实测两个桥并存时互相扫会形成级联互杀
+// （A 的清扫杀 B → B 的退出触发服务器重生 → C 的清扫杀 A…）。僵尸残桥的
+// 清理收敛到 CLI stop（scripts/clean-start.js stop 链路）统一执行，
+// 桥自身只按 pid 文件终止"上一个"。
+
 try {
   if (fs.existsSync(PID_FILE_PATH)) {
     const oldPid = parseInt(fs.readFileSync(PID_FILE_PATH, 'utf-8').trim(), 10);
