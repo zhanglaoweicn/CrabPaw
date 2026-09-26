@@ -329,4 +329,48 @@ describe('voice-realtime-ws /voice/realtime', () => {
     expect(client.messages.filter((m) => m.type === 'delegate')).toHaveLength(0);
     client.ws.close();
   });
+
+  // ─── 2026-09-25: 实时通道判活重构配套 ───
+  // 实机「弹过卡片后说话没反应、要等一会才有反应」: 客户端旧看门狗把"委托等待期
+  // 的静默"当假死强拆会话(动作比 ShowTyphoon 执行还早 1.1s)。修复分两层——客户端
+  // 委托豁免(纯函数单测见 gui/src/lib/rt-liveness.test.ts) + 后端协议层心跳。
+  test('心跳 ping → pong 回包（协议层判活, 与业务静默无关）', async () => {
+    const factory = createMockUpstreamFactory();
+    const { server, port } = await startServer('tok', factory, TEST_CONFIG);
+    ctx = { server };
+    const { client } = await openRealtimeSession(port, factory, 's12');
+
+    client.ws.send(JSON.stringify({ type: 'ping', ts: 1758800000000 }));
+    const pong = await client.wait((m) => m.type === 'pong', 3000);
+    expect(pong.ts).toBe(1758800000000);
+    // 心跳不得被上行协议消费(它是桥内控制帧, 不该发给火山)
+    expect(factory.created[0].sentFrames.some((f) => String(f).includes('"ping"'))).toBe(false);
+    client.ws.close();
+  });
+
+  test('静音期尾窗缓冲上限已放宽到 8s（旧 2s 上限会截断整句）', async () => {
+    const factory = createMockUpstreamFactory();
+    const { server, port } = await startServer('tok', factory, TEST_CONFIG);
+    ctx = { server };
+    const { client, mock } = await openRealtimeSession(port, factory, 's13');
+
+    // 播报期: 客户端静音 → 用户整句音频进水尾窗缓冲(156×640B ≈ 3.1s)
+    client.ws.send(JSON.stringify({ type: 'mute' }));
+    await sleep(50);
+    for (let i = 0; i < 156; i++) client.ws.send(Buffer.alloc(640, 7));
+    await sleep(80);
+    // 解除静音 → 尾窗补播
+    mock.sentFrames.length = 0;
+    client.ws.send(JSON.stringify({ type: 'unmute' }));
+    // 补播按实时节奏回灌(32000 B/s), 等它排空
+    await sleep(4000);
+
+    const appended = mock.sentFrames
+      .map((f) => JSON.parse(f))
+      .filter((f) => f.type === 'input_audio_buffer.append')
+      .reduce((n, f) => n + Buffer.from(f.audio, 'base64').length, 0);
+    // 旧上限 64000 只能补出 ~2s; 放宽后应明显更多(留出节奏化取整余量)
+    expect(appended).toBeGreaterThan(70000);
+    client.ws.close();
+  });
 });

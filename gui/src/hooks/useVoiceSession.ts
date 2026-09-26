@@ -26,6 +26,14 @@ import { createHighPass, createAgcBoost } from '../lib/voice-enhance'
 import { createCaptureNode, PCM_CHUNK_SAMPLES } from '../lib/audio-capture'
 // 2026-09-17: 实时端到端对话通道(豆包 Seeduplex)下行播放模块
 import { rtInitPlayback, rtSetCallbacks, rtPlayChunk, rtStopPlayback } from '../voice/rtPlayback'
+// 2026-09-25: 实时通道判活纯函数(委托豁免/续播去重/心跳探测)——实机"弹过卡片后
+// 说话没反应、要等一会"的根因是看门狗把委托等待误判成假死, 详见 lib/rt-liveness.ts
+import {
+  decideRtReconnect,
+  shouldReplaySpeakText,
+  shouldSendPing,
+  isPongTimedOut,
+} from '../lib/rt-liveness'
 
 // ─── 常量 ───────────────────────────────────────────────
 const SAMPLE_RATE = 16000
@@ -244,6 +252,21 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
   // 断线续播: 记录最近一次口播文本与完成态——WS 意外断线重连后未播完的摘要重读
   const rtEverReadyRef = useRef(false)
   const rtLastSpeakRef = useRef<{ text: string; done: boolean }>({ text: '', done: true })
+  // 2026-09-25: 断线续播去重——同一段文本最多重念一次(实测「明天海口是晴天」被念 3 遍:
+  // 会话被强拆时服务端 audio_end 丢失, done 恒假, 每次重连都重读)
+  const rtReplayedTextRef = useRef('')
+  // 2026-09-25: 委托在途标记——用户的问题交回主链路后, 静默是正常的(跑工具+模型可达
+  // 数十秒), 看门狗不得据此判假死(实机: 台风问答被误杀, 看门狗动作比 ShowTyphoon
+  // 实际执行还早 1.1s, 答案被推迟 30s+ 才播)
+  const rtDelegationSinceRef = useRef(0)
+  // 2026-09-25: 最近一次「真正上行」的人声帧时刻——判活必须用它而非本地采集人声
+  // (播报期间客户端静音不上行, 本地照样听得见说话声, 拿本地证据判活会制造假阳性)
+  const rtLastLoudSentTsRef = useRef(0)
+  // 2026-09-25: 协议层心跳(真死连接直接探测, 不靠"没听见话"间接猜)。
+  // 用「未回包计数」而非时间差——看门狗循环在 TTS 挂起/非活跃时会整体暂停,
+  // 时间差会凭空变大造成误判; 计数只在循环运行时累加, 免疫暂停。
+  const rtPingTsRef = useRef(0)
+  const rtPendingPingsRef = useRef(0)
   // 自愈保险: audio_start 后超过此时长仍卡在播报态(音频事件丢失)→ 强制复位
   const rtAudioStartTsRef = useRef(0)
   const asrWsRef = useRef<WebSocket | null>(null)
@@ -481,8 +504,14 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
       }
       // 静音帧裸发不增益——AGC 会把本底噪声放大到说话电平, 服务端永远
       // 听不到"说完"的安静 → 回复被推迟(实测主因); 语音帧照常 AGC。
-      const frame = isSilentChunk(i16, 0.0004) ? i16 : boostInt16(i16)
-      try { ws.send(frame.buffer) } catch (e) { console.warn('[RT] PCM 发送失败:', e) }
+      const rtSilent = isSilentChunk(i16, 0.0004)
+      const frame = rtSilent ? i16 : boostInt16(i16)
+      try {
+        ws.send(frame.buffer)
+        // 2026-09-25: 只有真正上行的人声才算「用户开过口」——判活证据取自发送侧,
+        // 避免"本地听得见但根本没发出去"制造假阳性(见 lib/rt-liveness 头部注释)
+        if (!rtSilent) rtLastLoudSentTsRef.current = Date.now()
+      } catch (e) { console.warn('[RT] PCM 发送失败:', e) }
       return
     }
     // 2026-08-04 修复:连续对话模式禁用静音门控——持续静音丢包 → 火山 ASR
@@ -557,15 +586,30 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
 
   const handleRtMessage = useCallback((msg: any) => {
     switch (msg.type) {
-      case 'ready':
+      case 'ready': {
+        // 2026-09-25: 会话(重)建立 → 心跳计数归零(防跨会话残留误判)
+        rtPingTsRef.current = 0
+        rtPendingPingsRef.current = 0
         // 2026-09-17: 断线续播——重连后(非首次)若上一条摘要未播完, 自动重读
-        if (rtEverReadyRef.current && rtLastSpeakRef.current.text && !rtLastSpeakRef.current.done) {
-          const text = rtLastSpeakRef.current.text
-          console.log('[RT] 重连续播:', text.slice(0, 30))
-          setTimeout(() => rtWsSend({ type: 'speak', text }), 400)
+        // 2026-09-25: 补去重——同一段文本最多重念一次(lib/rt-liveness.shouldReplaySpeakText)
+        const lastText = rtLastSpeakRef.current.text
+        if (shouldReplaySpeakText({
+          everReady: rtEverReadyRef.current,
+          text: lastText,
+          done: rtLastSpeakRef.current.done,
+          replayedText: rtReplayedTextRef.current,
+        })) {
+          rtReplayedTextRef.current = lastText
+          console.log('[RT] 重连续播:', lastText.slice(0, 30))
+          setTimeout(() => rtWsSend({ type: 'speak', text: lastText }), 400)
         }
         rtEverReadyRef.current = true
         diag('[rt-ready]', msg.sessionId)
+        break
+      }
+      case 'pong':
+        // 2026-09-25: 心跳回包——链路活着(与"有没有在说业务"无关)
+        rtPendingPingsRef.current = 0
         break
       case 'asr': {
         // 实时模型自带 ASR(累计式增量, final 为干净终稿)——仅驱动 UI 显示;
@@ -632,6 +676,9 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
         if (!utter) break
         const ctxTurns = Array.isArray(msg.context) ? msg.context : undefined
         console.log('[RT] 任务委托 → 主链路:', utter.slice(0, 50))
+        // 2026-09-25: 标记"委托在途"——主链路跑工具+模型期间豆包无下行是正常的,
+        // 看门狗据此豁免(实机台风问答: 20s 阈值在 ShowTyphoon 执行前 1.1s 误杀会话)
+        rtDelegationSinceRef.current = Date.now()
         transcriptSuppressUntilRef.current = Date.now() + 1500
         setInterimText('')
         const sendMsg = getSendMessage?.()
@@ -686,6 +733,10 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
     }
     if (buf.trim()) chunks.push(buf.trim())
     if (!chunks.length) return
+    // 2026-09-25: 答案已到达(无论是否立刻播) → 委托等待结束, 看门狗恢复常规阈值;
+    // 同时重置续播去重标记(新一段回复允许被中断后再续播一次)
+    rtDelegationSinceRef.current = 0
+    rtReplayedTextRef.current = ''
     if (rtSpeakingRef.current) {
       // 播报中: 新回复整体排队, 不打断当前块(audio_end 分支按队列续播)
       rtSpeakQueueRef.current = rtSpeakQueueRef.current.concat(chunks)
@@ -1312,15 +1363,39 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): VoiceSession
       // 2026-09-24 实测修复: 实时通道自有的"半开假活"自愈——后端被强杀/崩溃时发不出
       // WS 关闭帧,客户端 readyState 恒 OPEN 但对端已死: 说话照采照发、永不触发
       // onclose 重连,而重连预算已在重启风暴中耗尽 → 永久聋哑(实测: 重启风暴后
-      // 实时语音不出声)。自愈判据用下行活性而非转写(播报中转写本来就没有,而
-      // 播报中下行音帧连续, 不会误伤): 最近 60s 内用户开过口、且已停口 >3s,
-      // 但豆包下行 >20s 无任何帧 → 强拆重连(reconnectBuffer 补发不丢音频)。
+      // 实时语音不出声)。
+      // 2026-09-25 重构(实机"弹过卡片后说话没反应、要等一会"): 旧判据只看"用户说过话
+      // + 豆包 20s 无下行", 把**委托等待期**的静默误判成假死——台风问答实测看门狗动作
+      // 比 ShowTyphoon 实际执行还早 1.1s, 强拆会话后答案只能等重连补播, 用户白等 30s+。
+      // 现分两层: ①协议层心跳(P3)——真死连接直接探测, 与业务静默无关;
+      //          ②推断式判活(P0, 保底网)——委托在途给 120s 长阈值, 且"用户开过口"的
+      //            证据取自**真正上行**的人声帧(播报期本地音不上行, 拿本地证据会误判)。
       if (dialogChannelRef.current === 'realtime') {
-        const spokeRecently = now - lastLoudTsRef.current < 60000
-        const stoppedSpeaking = now - lastLoudTsRef.current > 3000
-        const sinceInbound = now - lastRtInboundTsRef.current
-        if (spokeRecently && stoppedSpeaking && sinceInbound > 20000 && !reconnectScheduledRef.current) {
-          console.warn('[VoiceSession] RT 半开假活自愈: 用户已说话但豆包下行 ' + Math.round(sinceInbound / 1000) + 's 无帧 → 强制重连')
+        // ── P3: 心跳保活探测 ──
+        if (shouldSendPing(now, rtPingTsRef.current)) {
+          rtPingTsRef.current = now
+          rtPendingPingsRef.current++
+          rtWsSend({ type: 'ping', ts: now })
+        }
+        if (!reconnectScheduledRef.current && isPongTimedOut(rtPendingPingsRef.current)) {
+          console.warn('[VoiceSession] RT 心跳连续 ' + rtPendingPingsRef.current + ' 次无回包 → 判链路半开, 强制重连')
+          rtPingTsRef.current = 0
+          rtPendingPingsRef.current = 0
+          reconnectScheduledRef.current = true
+          try { ws.close() } catch { console.warn('[ASR] WS 关闭失败(ws already closing)') }
+          setTimeout(() => { reconnectScheduledRef.current = false }, RECONNECT_RESET_WINDOW_MS)
+          return
+        }
+        // ── P0: 推断式判活(保底网) ──
+        const rtReason = decideRtReconnect({
+          now,
+          lastLoudSentTs: rtLastLoudSentTsRef.current,
+          lastInboundTs: lastRtInboundTsRef.current,
+          delegationSince: rtDelegationSinceRef.current,
+          reconnectScheduled: reconnectScheduledRef.current,
+        })
+        if (rtReason) {
+          console.warn('[VoiceSession] RT 半开假活自愈: ' + rtReason + ' → 强制重连')
           lastRtInboundTsRef.current = now // 防重连窗口内重复触发
           reconnectScheduledRef.current = true
           try { ws.close() } catch { console.warn('[ASR] WS 关闭失败(ws already closing)') }
