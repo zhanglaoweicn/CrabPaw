@@ -111,7 +111,11 @@ function createSessionHandlers(sendJson) {
               // 2026-08-14 数据链审计 I3: 磁盘仍为空但运行期内存有消息(防抖落盘窗口内)
               // → 非幽灵会话:保留索引并触发显式落盘,防止误删活跃会话数据。
               try {
-                const { memoryManager: runtimeMemory } = require('../../../core/memory-system');
+                // 2026-09-30 深度检查修复: require('../../../core/memory-system') 多退一级
+                // (本文件在 src/cli/handlers/, 应为 ../../core/) → 抛错被下方 catch 吞 →
+                // "磁盘空但内存有消息"的活跃会话保护恒不生效, 防抖落盘窗口内的会话
+                // 仍会被当幽灵会话清理(与该修复的初衷相反)。
+                const { memoryManager: runtimeMemory } = require('../../core/memory-system');
                 const runtimeSession = runtimeMemory?.sessions?.get(s.sessionId);
                 if (runtimeSession && runtimeSession.messages?.length > 0) {
                   runtimeMemory.flushSession(s.sessionId, userId).catch(e2 =>

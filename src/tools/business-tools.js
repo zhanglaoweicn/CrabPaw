@@ -9,7 +9,7 @@ async function handleShowBusinessReport(params) {
   try {
     const action = params.action || 'show';
     const { getSceneStore } = require('../core/scene/scene-store');
-    const { setPanelState, SURFACE_PANEL_MAP } = require('../core/panel-state');
+    const { setPanelState } = require('../core/panel-state');
     if (action === 'hide') {
       try { getSceneStore().removeSurface('business-panel'); } catch (e) { console.warn('[ShowBusinessReport] 移除 surface 失败:', e.message); }
       setPanelState('businessReport', 'closed');

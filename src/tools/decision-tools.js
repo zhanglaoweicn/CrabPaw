@@ -79,7 +79,7 @@ registry.register({
   timeout: 15000,
   isReadOnly: true,
   schema: VERIFY_SCHEMA,
-  async handler(params) {
+  async handler(_params) {
     const { getUnifiedStore } = require('../core/memory/unified-store');
     const { verifyChain } = require('../core/memory/provenance-chain');
     const store = getUnifiedStore();

@@ -4,14 +4,76 @@
  * 记录所有导入的业务表（表名/库路径/列结构/业务角色启发式识别），
  * 供 NL2SQL Schema 注入与播报服务聚合（Task 5/6）。
  * 持久化: data/.crabpaw/business/registry.json
+ *
+ * 数据目录口径与 2026-09-30 的目录分裂修复见下方 pickBusinessDir() 注释。
  */
-
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
 
-const BUSINESS_DIR = path.join(config.DATA_DIR, 'business');
+const EXPECTED_BUSINESS_DIR = path.join(config.DATA_DIR, 'business');
+
+/** 历史/发行版布局下的业务数据目录（程序树 data/business；U 盘旧版为 CrabPaw-Data/business） */
+const LEGACY_BUSINESS_DIR = path.join(__dirname, '..', '..', 'data', 'business');
+
+/**
+ * 解析生效的业务数据目录。**本项目运行在 U 盘上**（README：数据在 exe 同级的
+ * `CrabPaw-Data/`，删除即卸载、不写注册表）。Electron 向子进程注入
+ * `CRABPAW_DATA_DIR = <exeDir>/CrabPaw-Data`，后端 config 再拼 `.crabpaw`，因此：
+ *   - 现行位置：`<数据根>/.crabpaw/business/`（即 DATA_DIR/business）
+ *   - 历史位置：`<数据根>/business/`（老 U 盘/老版本把业务数据放在此）
+ *   - 开发树旧位置：`<程序树>/data/business/`
+ *
+ * 取"第一个含注册表的候选目录"：
+ *   1. DATA_DIR/business            —— 现行位置，优先
+ *   2. dirname(DATA_DIR)/business   —— U 盘旧版兄弟目录（升级后老 U 盘数据仍可读，不丢）
+ *   3. <程序树>/data/business        —— 仅当 DATA_DIR 位于程序树内时参与
+ *
+ * 第 3 条的守卫很关键：既兜住"开发机本地就是这套布局"，又避免任何以临时目录隔离
+ * DATA_DIR 的测试/多租户场景被程序树里的真实库抢走归属（实测会让 semantic-views
+ * 端到端用例直写生产库并失败）。
+ *
+ * 注意：这里只"读"不"搬"。数据始终留在 U 盘的 CrabPaw-Data 下，换机/换盘符零感知。
+ */
+function pickBusinessDir() {
+  const candidates = [
+    EXPECTED_BUSINESS_DIR,
+    path.join(path.dirname(config.DATA_DIR), 'business'),
+  ];
+  const inTreeDataRoot = path.join(__dirname, '..', '..', 'data');
+  if (path.resolve(path.dirname(config.DATA_DIR)) === path.resolve(inTreeDataRoot)) {
+    candidates.push(LEGACY_BUSINESS_DIR);
+  }
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'registry.json'))) {
+      if (path.resolve(dir) !== path.resolve(EXPECTED_BUSINESS_DIR)) {
+        console.warn(`[business-data-registry] 业务数据位于历史位置 ${dir}（现行位置 ${EXPECTED_BUSINESS_DIR} 无注册表）——按历史位置读取，功能正常；数据仍在数据根内，随 U 盘走，不会丢失。`);
+      }
+      return dir;
+    }
+  }
+  return EXPECTED_BUSINESS_DIR;
+}
+
+const BUSINESS_DIR = pickBusinessDir();
 const REGISTRY_FILE = path.join(BUSINESS_DIR, 'registry.json');
+
+/**
+ * 数据目录自检：生效位置没有注册表时给出明确提示，避免"静默返回 0 数据"
+ * 被当成"确实没有业务数据"（比报错更危险）。
+ */
+function warnIfLegacyLayout() {
+  try {
+    if (fs.existsSync(REGISTRY_FILE)) return;
+    for (const dir of [path.join(path.dirname(config.DATA_DIR), 'business'), LEGACY_BUSINESS_DIR]) {
+      if (fs.existsSync(path.join(dir, 'registry.json'))) {
+        console.warn(`[business-data-registry] 检测到历史位置仍有业务数据: ${dir}（本次生效位置 ${BUSINESS_DIR}）——请确认数据目录口径。`);
+        return;
+      }
+    }
+    console.warn(`[business-data-registry] 未找到业务注册表（${REGISTRY_FILE}）——业务卡/风险扫描将返回空；若刚导入过数据，请检查数据目录是否可写。`);
+  } catch (e) { /* 自检失败不影响主流程 */ }
+}
 
 // 业务角色启发式：列名 → 业务域。
 // 顺序敏感：采购语境列（采购金额）须先于 revenue 的 /金额/ 命中，否则方向反转。
@@ -116,11 +178,53 @@ function loadRegistry() {
   try {
     if (!fs.existsSync(REGISTRY_FILE)) return { tables: [] };
     const raw = JSON.parse(fs.readFileSync(REGISTRY_FILE, 'utf8'));
-    return { tables: Array.isArray(raw.tables) ? raw.tables : [] };
+    return { tables: healStaleDbPaths(Array.isArray(raw.tables) ? raw.tables : []) };
   } catch (e) {
     console.error('[business-data-registry] 读取注册表失败:', e.message || e);
     return { tables: [] };
   }
+}
+
+/**
+ * 2026-09-30 深度检查修复: 注册表里逐条登记了 `dbPath` 绝对路径, 一旦**旧布局**遗留的
+ * 路径失效(实测: registry.json 记 data/.crabpaw/business/business.db, 真身在
+ * data/business/), 登记项就全部指向不存在的文件。消费方(scanBusinessRisks /
+ * listOverdueReceivables 逐表回退 / commodity-service)会据此静默跳过 → 风险扫描恒 0、
+ * 明细恒空, 而端点仍报 ok:true("无逾期"比报错更危险)。
+ *
+ * 自愈规则(保守, 三条缺一不可):
+ *   1. 记录的 dbPath 存在            → 原样返回(绝不动正常条目);
+ *   2. 记录的不存在, 但本模块业务目录
+ *      下同名文件**确实存在**        → 判定为布局变迁, 改写该条并回写注册表;
+ *   3. 两者都不存在                  → 只标 `dbPathStale=true`, **绝不改写**。
+ * 第 3 条是关键: 测试与首次导入会"先登记、后建库"(或库在隔离目录里), 若无条件改写成
+ * 第二个候选, 就会把登记项指到另一份真实库上——本模块初版即因此让
+ * semantic-views 端到端用例从 4/4 通过变成失败, 并写出过一条指向 %TEMP% 的坏登记。
+ */
+function healStaleDbPaths(list) {
+  let healed = 0;
+  let stale = 0;
+  for (const t of list) {
+    if (!t || !t.dbPath) continue;
+    if (fs.existsSync(t.dbPath)) { delete t.dbPathStale; continue; }
+    const candidate = path.join(BUSINESS_DIR, path.basename(t.dbPath));
+    if (candidate !== t.dbPath && fs.existsSync(candidate)) {
+      t.dbPath = candidate;
+      delete t.dbPathStale;
+      healed++;
+    } else {
+      t.dbPathStale = true;
+      stale++;
+    }
+  }
+  if (healed > 0) {
+    console.warn(`[business-data-registry] 注册表自愈: ${healed} 条登记的 dbPath 已失效, 已改指 ${BUSINESS_DIR}`);
+    try { saveRegistry({ tables: list }); } catch (e) { console.warn('[business-data-registry] 自愈回写失败(仅内存生效):', e.message || e); }
+  }
+  if (stale > 0) {
+    console.warn(`[business-data-registry] ${stale} 条登记指向的库文件不存在(取数将为空, 非"无数据")——请重新导入或检查数据目录`);
+  }
+  return list;
 }
 
 function saveRegistry(registry) {
@@ -134,6 +238,20 @@ function saveRegistry(registry) {
  * @returns {{ role: string|null, direction: string|null, columns: Array<{name, type, role: string|null, canonical: string|null}> }}
  */
 function registerTable(meta) {
+  // 2026-09-30 防护: 路径诊断/临时库注册若落到"非本模块认定的业务数据目录", 会静默
+  // 覆盖真实注册表条目。实测踩过: 一个临时探针在 DATA_DIR 未生效时调本函数, 把生产
+  // registry.json 里的 receivables 条目改写成 %TEMP% 下的库 → 之后真实取数全部落空
+  // (且因为 listTables 过滤 dbPath === 传入路径, 表现为"库里有数据但扫描恒 0")。
+  // 这里只告警不拒绝(外部数据源注册是合法用法), 让日志能第一时间暴露。
+  try {
+    if (meta && meta.dbPath && path.resolve(meta.dbPath) !== path.join(BUSINESS_DIR, 'business.db')) {
+      const insideBusinessDir = path.resolve(meta.dbPath).startsWith(path.resolve(BUSINESS_DIR) + path.sep);
+      if (!insideBusinessDir) {
+        console.warn(`[business-data-registry] 注册表写入非常规库路径: ${meta.dbPath}(本模块业务库目录为 ${BUSINESS_DIR})——若非外部数据源注册, 请检查是否误用了临时目录`);
+      }
+    }
+  } catch (e) { /* 路径解析失败不影响注册 */ }
+
   const registry = loadRegistry();
   const cols = (meta.columns || []).map((c) => ({
     name: c.name,
@@ -308,6 +426,9 @@ module.exports = {
   listDataPoints,
   BUSINESS_DIR,
   REGISTRY_FILE,
+  EXPECTED_BUSINESS_DIR,
+  LEGACY_BUSINESS_DIR,
+  warnIfLegacyLayout,
   registerTable,
   registerExternalTable,
   listTables,

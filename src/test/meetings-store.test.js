@@ -160,7 +160,7 @@ describe('parseSummaryReply 宽松正则家族', () => {
   });
 
   test('无核心要点节时降级：提取 - • 数字行', () => {
-    const { summary, keyPoints } = parseSummaryReply(
+    const { summary: _summary, keyPoints } = parseSummaryReply(
       '## 会议摘要\n内容\n- 行一\n• 行二\n2. 行三\n普通文本行\n- 行四'
     );
     expect(keyPoints).toEqual(['行一', '行二', '行三', '行四']);

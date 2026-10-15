@@ -10,7 +10,7 @@
  *   现改为：播放驱动只依赖 [isTtsPlaying, muted]（守卫翻转才停音频）；
  *   入队/出队通过单独的 jobs effect 调 playIfIdle 拾取。enqueue 不再触发 cleanup 停音频。
  */
-import { useCallback, useEffect, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import { speechQueueReducer, nextToPlay, type SpeechJob, type SpeechQueueState } from '../lib/speech-queue'
 import { duckVolumeFor } from '../lib/voice-engine-utils'
 import { setTtsActive } from '../lib/tts-state'
@@ -58,6 +58,50 @@ export function useSpeechQueue({ isTtsPlaying, muted, voice = 'zh-CN-XiaoxiaoNeu
   const clearByPrefix = useCallback((prefix: string) => {
     dispatch({ type: 'clearByPrefix', prefix })
   }, [])
+  // 2026-10-09 晨报"下一段": 立即结束当前段音频并释放播放位。没有它,"跳过当前段"
+  // 就是假跳过——状态前进了,音频还是播完整段才轮转。状态释放走守卫翻转 cleanup
+  // 同一套路径(onended 置空防双重 dequeue;递增代际 token 作废在途播放协程)。
+  const skipCurrent = useCallback((): boolean => {
+    const audio = audioRef.current
+    if (!audio) return false
+    playSeqRef.current++
+    try { audio.onended = null; audio.pause() } catch (e) { console.warn('[speech-queue] skipCurrent 停音频失败:', e) }
+    audioRef.current = null
+    playingRef.current = false
+    ;(window as any).__speechQueuePlaying = false
+    setTtsActive('speech-queue', false)
+    dispatch({ type: 'dequeue' })
+    return true
+  }, [])
+
+  /**
+   * 2026-09-30 P1-2 音频优先晨报: "再说一遍"——重播**最后播完的一段**。
+   *
+   * 为什么需要它：老板在车里听到一句想再听，让整段晨报重来是最恼人的体验
+   * （要重新等几十秒才回到那句）。这里记住已播段并把它插回队首。
+   * 只记最近 8 段（含预热音频），足够"再说一遍/再上一句"，不占内存。
+   */
+  const historyRef = useRef<SpeechJob[]>([])
+  const replaySeqRef = useRef(0)
+  const HISTORY_MAX = 8
+  const lastPlayedRef = useRef<SpeechJob | null>(null)
+  useEffect(() => {
+    const playing = state.playingId
+    if (!playing) return
+    const job = state.jobs.find(j => j.id === playing)
+    if (!job) return
+    lastPlayedRef.current = job
+    if (historyRef.current[historyRef.current.length - 1]?.id === job.id) return
+    historyRef.current = [...historyRef.current, job].slice(-HISTORY_MAX)
+  }, [state.playingId, state.jobs])
+
+  const replayLast = useCallback((): boolean => {
+    const prev = lastPlayedRef.current || historyRef.current[historyRef.current.length - 1]
+    if (!prev) return false
+    // 用新 id 避免与可能残留的同 id job 冲突（replay 动作本身也会剔除同 id 旧项）
+    dispatch({ type: 'replay', job: { ...prev, id: `${prev.id}#replay-${++replaySeqRef.current}` } })
+    return true
+  }, [])
 
   // B2: 核心播放逻辑抽成 playIfIdle——空闲且队列非空且主对话空闲时播队首。
   // 由两个 effect 调用：守卫翻转 effect + jobs 变化 effect。
@@ -94,13 +138,19 @@ export function useSpeechQueue({ isTtsPlaying, muted, voice = 'zh-CN-XiaoxiaoNeu
     let cancelled = false
     const play = async () => {
       try {
+        // 2026-09-30 P1-2 音频优先晨报: job 自带预热音频 → 直接播，跳过合成往返。
+        // 这是"老板说晨报就立刻出声"的实现路径（预热见 lib/tts-prewarm.ts）。
+        // 注意仍走同一套播放/清理/防重入逻辑，避免出现第二条播放通道。
+        let data: any = null
+        if (job.audio?.audioBase64) {
+          data = { audioBase64: job.audio.audioBase64, audioFormat: job.audio.audioFormat }
+        }
         // 2026-08-04 修复:渲染进程 fetch 到 38767 不稳定(Failed to fetch,与 DocReader 同款
         // 网络层问题)→ 语音队列 TTS 全失败(无播报)。Electron 走 api.proxy(主进程代理,
         // 与后端直连同行为,完全绕开渲染进程网络层)
-        let data: any = null
         // 2026-09-04 部门化 P3: job.voice 优先——岗位音色(voiceStyle→TTS voice), 缺省回落队列配置
         const effectiveVoice = job.voice || v
-        if (typeof window !== 'undefined' && window.electronAPI?.api?.proxy) {
+        if (!data && typeof window !== 'undefined' && window.electronAPI?.api?.proxy) {
           const res = await window.electronAPI.api.proxy('POST', '/api/voice/tts', { text: job.text, voice: effectiveVoice, speed: sp })
           if (cancelled) { playingRef.current = false; (window as any).__speechQueuePlaying = false; setTtsActive('speech-queue', false); return }
           if (!res?.success) { console.error('[speech-queue] TTS 合成失败:', res?.error || res?.status); playingRef.current = false; (window as any).__speechQueuePlaying = false; setTtsActive('speech-queue', false); dispatch({ type: 'dequeue' }); return }
@@ -189,5 +239,20 @@ export function useSpeechQueue({ isTtsPlaying, muted, voice = 'zh-CN-XiaoxiaoNeu
 
   // 2026-08-08: 暴露播放状态——VoiceShell 语音球据此切换 speaking(蓝色)态。
   // reducer 的 playingId 非空即播放中(dispatch start 置位、dequeue 清空,自动触发重渲染)
-  return { enqueue, reset, clearByPrefix, pending: state.jobs.length, isPlaying: state.playingId !== null }
+  //
+  // 2026-09-30 P1-2 音频优先晨报: 额外暴露**正在播的那条 job**。
+  // 这是"屏幕显示必须等于正在播的段"的唯一可信来源——不要另建一套 position 状态，
+  // 否则音频与屏幕会各走各的（规格 §4.3 的同步要求）。
+  const currentJob = useMemo(
+    () => (state.playingId ? state.jobs.find(j => j.id === state.playingId) ?? null : null),
+    [state.playingId, state.jobs],
+  )
+
+  return {
+    enqueue, reset, clearByPrefix, replayLast, skipCurrent,
+    pending: state.jobs.length,
+    isPlaying: state.playingId !== null,
+    /** 正在播的 job（含 segmentIndex，供晨报做屏音同步）；空闲时为 null */
+    currentJob,
+  }
 }

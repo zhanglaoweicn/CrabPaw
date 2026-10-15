@@ -31,7 +31,7 @@ const fs = require('fs');
 
 beforeEach(() => { jest.clearAllMocks(); });
 
-const writtenMd = (content) => handleWrite({
+const _writtenMd = (content) => handleWrite({
   file_path: path.join(os.tmpdir(), `fg-autodocx-${Date.now()}-${Math.random().toString(36).slice(2)}.md`),
   content,
 });

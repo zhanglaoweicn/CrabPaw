@@ -45,7 +45,7 @@ describe('turn-tracker step 边界派生', () => {
 });
 
 // Task 3: sse-broadcast 接线后, step 派生事件会进入广播
-const { addSSEClient, removeSSEClient, broadcastEvent, handleSSE, _resetStreamState } = require('../core/sse-broadcast');
+const { addSSEClient, removeSSEClient, broadcastEvent, _resetStreamState } = require('../core/sse-broadcast');
 describe('turn-tracker 接线', () => {
   beforeEach(() => { _resetStreamState(); });
   test('run:start 广播自动补发 step:start', () => {

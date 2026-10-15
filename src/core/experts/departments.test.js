@@ -7,7 +7,6 @@
 const {
   DEPARTMENTS,
   DEPARTMENT_IDS,
-  DIVISION_POLICY,
   ROLE_ALIASES,
   TEAM_PRESETS,
   DEPARTMENT_TOOLSETS,
@@ -80,7 +79,7 @@ describe('数据纪律', () => {
   test('工具面键必须为 toolset-manager CORE_TOOLSETS 真名(防漂移)', () => {
     const { getToolsetManager } = require('../toolset-manager');
     const tsm = getToolsetManager();
-    for (const [deptId, toolsets] of Object.entries(DEPARTMENT_TOOLSETS)) {
+    for (const [_deptId, toolsets] of Object.entries(DEPARTMENT_TOOLSETS)) {
       for (const ts of toolsets) {
         expect(tsm.getToolset(ts)).not.toBeNull();
       }
@@ -91,7 +90,7 @@ describe('数据纪律', () => {
     const fs = require('fs');
     const path = require('path');
     const skillsDir = path.join(__dirname, '../../../skills');
-    for (const [deptId, skills] of Object.entries(DEPARTMENT_SKILLS)) {
+    for (const [_deptId, skills] of Object.entries(DEPARTMENT_SKILLS)) {
       for (const s of skills) {
         expect(fs.existsSync(path.join(skillsDir, s))).toBe(true);
       }

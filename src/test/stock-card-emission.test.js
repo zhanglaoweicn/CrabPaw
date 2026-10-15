@@ -10,7 +10,7 @@
  * StockPanelData），单股 K线并入 data.kline；stocks-kline 不再独立发射。
  */
 
-const { getSceneStore } = require('../core/scene/scene-store');
+require('../core/scene/scene-store');
 const { getEffectiveState, setPanelState } = require('../core/panel-state');
 const { _publishStockCard, _publishStockEmptyCard } = require('../tools/stock-tools');
 

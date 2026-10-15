@@ -1,4 +1,4 @@
-const { BoundedBacklog, NoSpeechWatchdog, computeRms } = require('../core/voice-pipeline');
+const { BoundedBacklog, computeRms } = require('../core/voice-pipeline');
 
 describe('BoundedBacklog 阈值双级背压', () => {
   it('queue 达到 60% 触发 high（去抖在调用方,此处逐次回调）', () => {

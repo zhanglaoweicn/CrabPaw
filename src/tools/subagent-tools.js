@@ -15,6 +15,13 @@
 const { registry } = require('./registry');
 const { getTieredSubAgentRunner, AGENT_TIERS } = require('../core/agent/tiered-subagent-runner');
 const { broadcastEvent } = require('../core/sse-broadcast');
+const { setToolRegistry: setSubAgentToolRegistry } = require('../core/subagent-enhanced');
+
+// 依赖反转接线（层契约 R1: core 禁止 require 上层 src/tools）——子代理的默认工具执行器
+// 由本文件（tools 层）注入注册表句柄，与 self-awareness-tool.js:19 同款做法。
+// 2026-09-30 深度检查修复：此前 core 侧用不存在路径 require('./tool-system')，异常被吞，
+// 导致所有走 tiered runner / 专家协作 / 圆桌的子代理"一个工具都调不动"。
+setSubAgentToolRegistry(registry);
 
 const VALID_ARCHETYPES = [
   'planner', 'researcher', 'code_executor', 'critic',

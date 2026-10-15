@@ -441,11 +441,19 @@ class MemoryManager extends EventEmitter {
     const session = this.getSession(sessionId);
     if (!session || session.messages.length === 0) return { flushed: 0, facts: [] };
 
+    // 2026-10-09 session-commit: collectOnly 模式——只提炼候选事实不落库，
+    // 由调用方(会话收口管线)做 新建/合并/跳过 决策后再写。
+    const collectOnly = options.collectOnly === true;
+
     const llmCall = options.llmCall || resolveLLMCall();
     if (!llmCall) {
       const extracted = memoryExtractionService._regexFallback(
         session.messages.filter(m => m.role === 'user').map(m => m.content)
       );
+      if (collectOnly) {
+        const candidates = extracted.filter(item => item.confidence >= 0.4);
+        return { flushed: candidates.length, facts: [], candidates, mode: 'regex' };
+      }
       const stored = [];
       for (const item of extracted) {
         if (item.confidence >= 0.4) {
@@ -476,6 +484,11 @@ class MemoryManager extends EventEmitter {
       const gated = facts.filter(f => memoryExtractionService._gateCheck({
         content: f.content, confidence: 0.5, type: f.type, source: 'flush'
       }));
+
+      // collectOnly：候选原样返回，落库决策交给 session-commit 的提炼层
+      if (collectOnly) {
+        return { flushed: gated.length, facts: [], candidates: gated, mode: 'llm' };
+      }
 
       const stored = [];
       for (const fact of gated) {

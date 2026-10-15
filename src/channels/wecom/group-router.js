@@ -163,7 +163,7 @@ class GroupRouter extends EventEmitter {
     return result;
   }
 
-  _stripMentionTags(content, mentionList) {
+  _stripMentionTags(content, _mentionList) {
     if (!content) return content;
     // 2026-09-06 修复: 原实现只要机器人被提及就把所有 @某人 前缀一并剥掉
     // （mentionList.includes(botUserId) 对每个 match 恒真）——改为只剥

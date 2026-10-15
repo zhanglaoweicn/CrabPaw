@@ -7,8 +7,8 @@
  */
 'use strict';
 
-const { sendJson, sendError, readJsonBody } = require('./http-utils');
-const { createEventService, CalendarEvent, toISO8601 } = require('../schedule');
+const { readJsonBody } = require('./http-utils');
+require('../schedule');
 
 // handler 内部通过 getScheduleService() 惰性创建服务——mock createEventService
 // 让测试注入假 service（getById/update 记录调用）。

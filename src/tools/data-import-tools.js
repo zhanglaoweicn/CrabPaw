@@ -65,7 +65,7 @@ function inferColumnType(values) {
 }
 
 /** 规范化表名：中文/特殊字符 → 下划线 */
-function normalizeTableName(name, columns) {
+function normalizeTableName(name, _columns) {
   let base = (name || 'table').replace(/[^\w一-鿿㐀-䶿-]/g, '_');
   if (!/^[\w一-鿿]/.test(base)) base = `t_${base}`;
   if (!/\D/.test(base)) base = `t_${base}`;

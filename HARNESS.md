@@ -1,4 +1,4 @@
-﻿# CrabPaw Harness Engineering 规范 v2.6.0
+# CrabPaw Harness Engineering 规范 v2.6.0
 
 > **Harness = Tools + Knowledge + Observation + Action + Permissions**
 >
@@ -13,13 +13,13 @@
 <!-- BEGIN GENERATED: harness-facts (scripts/harness-facts.js — npm run facts:write 更新 / facts:check 校验; 请勿手改数字) -->
 | 事实 | 实测值 | 单一事实源 |
 |---|---|---|
-| 工具契约主键 | 252 | src/core/tool-contract.js → TOOL_CONTRACTS |
+| 工具契约主键 | 231 | src/core/tool-contract.js → TOOL_CONTRACTS |
 | 契约遗留别名 | 24（snake 22 + kebab 2） | 同上 → LEGACY_SNAKE/KEBAB_ALIASES |
-| 契约键合计 | 276 | 上两行之和 |
+| 契约键合计 | 255 | 上两行之和 |
 | 审计事件类型 | 43 | src/core/audit-log-v2.js → AUDIT_EVENTS |
 | Eval 套件 / 用例 | 59 / 462 | evals/suite-registry.js |
 | PROMPT_VERSION | 未检出（代码中无常量，版本记录见 HARNESS.md 提示词版本表） | src/core/system-prompt.js |
-<!-- 生成时间: 2026-09-24T09:11:20.125Z -->
+<!-- 生成时间: 2026-10-15T11:04:12.374Z -->
 <!-- END GENERATED: harness-facts -->
 
 ## 一、Tool Contract 规范
@@ -150,10 +150,28 @@ push / pull_request →
 
 ## 六、可观测性规范
 
+### 6.0 数据目录口径（U 盘便携形态，**改动数据路径前必读**）
+
+CrabPaw 面向购买 U 盘的用户，**不安装任何环境**，全部数据随盘走：
+
+| 形态 | 数据根 | 后端 `DATA_DIR` | 业务数据位置 |
+|------|--------|-----------------|--------------|
+| U 盘 / 便携版 | `<exeDir>/CrabPaw-Data/`（Electron `getPortableDataDir()`） | `<数据根>/.crabpaw`（由 `CRABPAW_DATA_DIR` 注入后端） | `<数据根>/.crabpaw/business/` |
+| 老 U 盘 / 老版本 | 同上 | 同上 | `<数据根>/business/`（历史兄弟目录，仍在数据根内） |
+| 开发树 | `data/.crabpaw/` | `data/.crabpaw` | `data/business/`（程序树旧位置） |
+
+铁律：
+1. **不得把用户数据搬到数据根之外**——换机/换盘符必须零感知，删除 `CrabPaw-Data/` 即卸载。
+2. `DATA_DIR` 本身**已含 `.crabpaw`**，新增代码不得再拼 `.crabpaw`（否则又生双嵌套）。
+3. 读取历史位置（老 U 盘）是**刻意的向后兼容**，见 `src/core/business-data-registry.js` 的 `pickBusinessDir()`；该回退带"仅当 DATA_DIR 位于程序树内才考虑程序树旧位置"的守卫，以保住测试/多租户的临时目录隔离。
+4. 便携发行**不播种业务数据**（`gui/electron/main/index.ts` 的 `EXCLUDE_DIRS` 含 `business`）——业务表由用户自行导入。
+
 ### 6.1 轨迹记录
 - 每次对话请求记录完整轨迹（输入、工具调用序列、LLM 响应、输出、耗时）
 - 轨迹存储于 `data/.crabpaw/trajectories/` 目录（2026-09-03 Runtime 加固轮已归并：历史代码以 DATA_DIR 拼 `.crabpaw/trajectories` 形成的双嵌套 `data/.crabpaw/.crabpaw/` 已由 config.js `_migrateNestedDataDir()` 启动迁移归并为单层，全库 26 文件 40+ 处 `path.join(DATA_DIR, '.crabpaw', ...)` 已改单层，以实测目录为准）
-- 保留时间：30 天
+  注（2026-09-30 深度检查）：迁移只是搬运，**源头并未全部修完**——`src/core/metrics-pipeline.js:15` 曾持续构造 `DATA_DIR/.crabpaw/metrics` 导致该层反复再生（已修）。新增代码写数据目录时一律不得再拼 `.crabpaw`（`DATA_DIR` 本身已含该段）。
+- 保留时间：30 天（`src/core/trajectory.js` `maxAgeDays=30`）
+- 审计日志保留时间为 90 天（`src/core/audit-log-v2.js` `retentionDays: 90`，与轨迹保留期不同，勿混用）
 
 ### 6.2 指标收集
 - **延迟指标**：LLM 调用延迟、工具调用延迟、总量
@@ -318,16 +336,16 @@ npm install echarts canvas
 |----|------|------|
 | Layer 4: 治理层 | HARNESS.md | ✅ v2.4.0 |
 | | Eval Framework | ✅ 套件/用例数以 §〇 生成块为准（`npm run facts:check` 校验） |
-| | Tool Contracts | ✅ 完整覆盖（契约数量口径以 §〇 生成块为准；单源化自动对齐，以 `npm run plugin:verify` / tool-contract.js 实际输出为准） |
+| | Tool Contracts | ✅ 完整覆盖（契约数量口径以 §〇 生成块为准；`npm run facts:check` 校验生成块，运行期键值用 `npm run harness:dump` 查询；`npm run plugin:verify` 只校验 plugins/ 目录清单，**不统计契约数量**） |
 | | Eval Suites | ✅ 用例数以 §〇 生成块为准（`npm run facts:check` 校验） |
 | Layer 3: 可观测层 | Dashboard | ✅ JSON+HTML+OTel |
-| | Metrics Pipeline | ✅ 319L（2026-08-30 实测，以 wc -l 输出为准） |
-| | Trajectory | ✅ 198L（2026-08-30 实测，以 wc -l 输出为准） |
-| Layer 2: 任务层 | TaskFlow Bridge | ✅ 230L（2026-08-30 实测，以 wc -l 输出为准） |
+| | Metrics Pipeline | ✅ 362 行（2026-09-30 实测，`wc -l` 口径） |
+| | Trajectory | ✅ 311 行（2026-09-30 实测，`wc -l` 口径） |
+| Layer 2: 任务层 | TaskFlow Bridge | ✅ 231 行（2026-09-30 实测，`wc -l` 口径） |
 | | ConversationIntegration | ✅ 与Runtime绑定 (v2.2.0修复) |
-| | Progress Reporter | ✅ 120L（2026-08-30 实测，以 wc -l 输出为准） |
-| Layer 1: 基础层 | Tool Registry | ✅（工具数以 §〇 生成块为准，`npm run plugin:verify` / registry 实际输出为准） |
-| | Skill System | ✅ skills/ 68 个目录（含 58 个 SKILL.md）+ data/skills/ 22 个目录（含 20 个 SKILL.md，其中 2 个与 skills/ 重名）——两目录口径并列、不合并为单一数字（2026-08-30 实测，以 ls 实际输出为准） |
+| | Progress Reporter | ✅ 121 行（2026-09-30 实测，`wc -l` 口径） |
+| Layer 1: 基础层 | Tool Registry | ✅（工具数以 §〇 生成块为准；实际运行期清单用 `npm run harness:dump` 或 `registry.getAll()` 查；`npm run plugin:verify` 只校验插件清单） |
+| | Skill System | ✅ skills/ 66 个目录（含 58 个 SKILL.md）+ data/skills/ 24 个目录（其中 2 个与 skills/ 重名：deep-research、multi-search-engine）——两目录口径并列、不合并为单一数字（2026-09-30 实测，以 ls 实际输出为准） |
 | | Context Budget | ✅ |
 | | Sub-agent Contract | ✅ |
 

@@ -96,8 +96,12 @@ class VideoGenerator extends EventEmitter {
       }
 
       // 下载视频到本地
+      // 2026-09-30 深度检查修复: 此前拼 `.crabpaw/generated-videos`, 但 DATA_DIR 本身
+      // 已以 .crabpaw 结尾(config.js:118-121) → 产物落到 .crabpaw/.crabpaw/ 下, 而
+      // /files/ 白名单(files.js:139)、remotion-tools/hyperframes-tools 均在
+      // {DATA_DIR}/generated-videos 取件 → 生成的视频在界面上取不到。
       const outputDir = options.output_dir
-        || path.join(DATA_DIR || require('os').homedir(), '.crabpaw', 'generated-videos');
+        || path.join(DATA_DIR || require('os').homedir(), 'generated-videos');
       if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
       }
@@ -220,9 +224,9 @@ class VideoGenerator extends EventEmitter {
         return { success: false, error: '图片转视频超时或失败', videos: [] };
       }
 
-      // 下载到本地
+      // 下载到本地（路径口径同上方 generateVideo：{DATA_DIR}/generated-videos）
       const outputDir = options.output_dir
-        || path.join(DATA_DIR || require('os').homedir(), '.crabpaw', 'generated-videos');
+        || path.join(DATA_DIR || require('os').homedir(), 'generated-videos');
       if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
       const fileName = `img2video_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.mp4`;
       const filePath = path.join(outputDir, fileName);

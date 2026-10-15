@@ -1,0 +1,144 @@
+/**
+ * ProvenancePanel 样式（2026-09-30，P2）
+ *
+ * 设计意图：这是一张"凭证"，不是装饰。所以：
+ *   · 链路用一行横向节点 + 箭头，背景极简——读的顺序就是数据流的顺序
+ *   · 事实行用等宽数字（tabular-nums），与 HUD 同款，便于逐项核对
+ *   · 警告用琥珀（与 HUD 的 stale 同色系）——同一套"需要你注意"的语言
+ *   · 不用 backdrop-filter（外层 ShellFloatCard 的 blur 档已负责，避免叠加合成层）
+ */
+.prov {
+  padding: 10px 12px 12px;
+  font-size: 12px;
+  color: var(--text-secondary, #a1a1aa);
+}
+
+.prov__loading {
+  padding: 6px 0;
+  color: var(--text-muted, #71717a);
+}
+
+/* ── 链路 ── */
+.prov__chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 4px;
+}
+.prov__chain-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.prov__arrow {
+  color: var(--text-muted, #71717a);
+  font-size: 11px;
+}
+.prov__node {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.1));
+  background: var(--bg-tertiary, #18181b);
+  max-width: 150px;
+}
+.prov__node--metric {
+  border-color: rgba(0, 229, 255, 0.35);
+}
+.prov__node--warn {
+  border-color: rgba(245, 158, 11, 0.5);
+}
+.prov__node-title {
+  color: var(--text-primary, #fafafa);
+  font-weight: 600;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prov__node-sub {
+  margin-top: 2px;
+  color: var(--text-muted, #71717a);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 事实行（可核验数字）── */
+.prov__facts {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-primary, rgba(255, 255, 255, 0.08));
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.prov__fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.prov__fact-key {
+  color: var(--text-muted, #71717a);
+}
+.prov__fact-val {
+  color: var(--text-primary, #fafafa);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  text-align: right;
+}
+
+/* ── 注意事项（对账差异/退役/未登记）── */
+.prov__warnings {
+  margin: 8px 0 0;
+  padding: 6px 8px 6px 18px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.08);
+  color: #fbbf24;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.prov__warnings li {
+  margin: 2px 0;
+}
+
+/* ── 不可用（不是"没有数据"）── */
+.prov__unavailable-title {
+  color: var(--text-primary, #fafafa);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.prov__unavailable-reason {
+  color: #fbbf24;
+  font-size: 11.5px;
+  word-break: break-word;
+  line-height: 1.5;
+}
+.prov__hint {
+  margin-top: 6px;
+  color: var(--text-muted, #71717a);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.prov__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.prov__act {
+  flex: 1;
+  padding: 5px;
+  border-radius: 6px;
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.1));
+  background: transparent;
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color var(--transition-fast, 150ms) ease, border-color var(--transition-fast, 150ms) ease;
+}
+.prov__act:hover {
+  border-color: var(--glass-border, rgba(255, 255, 255, 0.18));
+  color: var(--text-primary, #fafafa);
+}

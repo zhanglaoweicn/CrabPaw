@@ -12,14 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { WORKSPACE_DIR } = require('./config');
 const { isChannelEnabled } = require('./credential-manager');
-const { memoryManager } = require('./memory-system');
-const { contextCache } = require('./context-cache');
-const { buildSystemPrompt, buildLayeredSystemPrompt } = require('./system-prompt');
-const { buildCompactMemoryPrompt, loadSmartContext } = require('./memory-smart-loader');
-const { preprocessContextReferences } = require('./context/context-references');
-const { BOOTSTRAP_MARKER, buildBootstrapBookmark, buildBootstrapDetail, injectFullBootstrap } = require('./bootstrap-injector');
 const { estimateMessagesTokens } = require('./context/compressor');
 
 /**

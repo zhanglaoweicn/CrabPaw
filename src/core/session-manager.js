@@ -163,6 +163,21 @@ class SessionManager extends EventEmitter {
     this.recovery.unregisterSession(sessionId);
     this._sessions.delete(sessionId);
     this.emit('session_closed', { sessionId });
+
+    // 2026-10-09 会话收口: 真正关闭 = 立即触发记忆提交(不走防抖)。
+    // 此前 session_closed 仅本实例内 emit,记忆巩固层(unified-memory 的
+    // session:end 订阅)对会话关闭无感知。
+    try {
+      const { getEventBus } = require('./events');
+      getEventBus().publish('session', 'end', {
+        sessionId,
+        userId: session.userId || null,
+        trigger: 'session_closed',
+        messageCount: session.messageCount || 0,
+      });
+    } catch (e) {
+      console.warn('[SessionManager] session:end 发布失败:', e.message);
+    }
     return true;
   }
 

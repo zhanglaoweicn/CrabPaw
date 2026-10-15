@@ -21,6 +21,18 @@ const IMAGE_GEN_PROVIDERS = {
     model: 'wanx-v1',
     maxSize: '1024x1024',
     maxN: 4
+  },
+  // 2026-10-09: Agnes Image 2.5 Flash(agnes-ai.com,OpenAI images 兼容形态)。
+  // 文档要点: ① response_format 必须放 extra_body 内,放顶层会被忽略;
+  // ② size 用 1K/2K/3K/4K 档位(精确像素尺寸会被服务端自动标准化);
+  // ③ 宽高比用显式 ratio 字段(1:1/3:4/4:3/16:9/9:16/2:3/3:2/21:9);
+  // ④ 支持 extra_body.image 数组垫图(图生图/多图合成);⑤ 单请求单图。
+  agnes: {
+    name: 'Agnes Image 2.5 Flash',
+    url: 'https://apihub.agnes-ai.com/v1/images/generations',
+    model: 'agnes-image-2.5-flash',
+    maxSize: '4096x4096',
+    maxN: 1
   }
 };
 
@@ -29,7 +41,13 @@ const VALID_SIZES = new Set([
   '1440x2560', '2560x1440',
   '1080x1920', '1920x1080',
   '1024x1792', '1792x1024',
-  '768x1024', '1024x768'
+  '768x1024', '1024x768',
+  // 2026-10-09 补齐: ASPECT_RATIO_TO_SIZE 映射了这些比例,但此前不在白名单——
+  // 传 2:3/3:4/4:3/5:4/21:9 必被"不支持的图像尺寸"拒绝(映射与白名单脱节)
+  '1440x2160', '2160x1440',
+  '1440x1920', '1920x1440',
+  '1536x1920', '1920x1536',
+  '2560x1097'
 ]);
 
 const VALID_ASPECT_RATIOS = new Set([
@@ -244,6 +262,8 @@ class ImageGenerator extends EventEmitter {
         return this._callDoubao(providerName, providerInfo, prompt, options);
       case 'qwen':
         return this._callQwen(providerName, providerInfo, prompt, options);
+      case 'agnes':
+        return this._callAgnes(providerName, providerInfo, prompt, options);
       default:
         return this._callDoubao(providerName, providerInfo, prompt, options);
     }
@@ -331,6 +351,144 @@ class ImageGenerator extends EventEmitter {
       revisedPrompt: enhancedPrompt,
       raw: data
     };
+  }
+
+  // ── 2026-10-09 Agnes Image 2.5 Flash ──────────────────────────
+  // OpenAI images 兼容形态 + 档位式尺寸。走独立分支而非复用 _callDoubao,
+  // 因为两者对 size/response_format 的语义不同(doubao 的 minPixels 门槛、
+  // 顶层 response_format 在 Agnes 会被忽略,必须放 extra_body)。
+
+  /** 像素尺寸 → Agnes 档位(1K/2K/3K/4K),按总像素分档(与官方档位矩阵对齐) */
+  _agnesSizeToTier(size) {
+    const [w, h] = String(size).split('x').map(Number);
+    const pixels = (w || 0) * (h || 0);
+    if (pixels >= 12 * 1024 * 1024) return '4K';
+    if (pixels >= 6 * 1024 * 1024) return '3K';
+    if (pixels >= 2 * 1024 * 1024) return '2K';
+    return '1K';
+  }
+
+  /** 显式 aspectRatio 优先;否则从像素尺寸反推最接近的受支持宽高比 */
+  _agnesRatioFromSize(size, aspectRatio) {
+    if (aspectRatio) return aspectRatio;
+    const [w, h] = String(size).split('x').map(Number);
+    if (!w || !h) return '1:1';
+    for (const [r, s] of Object.entries(ASPECT_RATIO_TO_SIZE)) {
+      if (s === size) return r;
+    }
+    const supported = ['1:1', '2:3', '3:2', '3:4', '4:3', '16:9', '9:16', '21:9'];
+    const target = w / h;
+    let best = '1:1';
+    let bestDiff = Infinity;
+    for (const r of supported) {
+      const [a, b] = r.split(':').map(Number);
+      const diff = Math.abs(a / b - target);
+      if (diff < bestDiff) { bestDiff = diff; best = r; }
+    }
+    return best;
+  }
+
+  async _callAgnes(providerName, providerInfo, prompt, options) {
+    const providerConfig = this._getProviderConfig(providerName);
+    if (!providerConfig) {
+      return { success: false, error: `未找到 ${providerName} 配置`, images: [] };
+    }
+
+    const baseUrl = (providerConfig.baseUrl || 'https://apihub.agnes-ai.com/v1').replace(/\/+$/, '');
+    const apiKey = providerConfig.apiKey;
+    const model = providerConfig.model || providerInfo.model;
+    const url = `${baseUrl}/images/generations`;
+
+    const size = options.size || '1024x1024';
+    const tier = this._agnesSizeToTier(size);
+    const ratio = this._agnesRatioFromSize(size, options.aspectRatio);
+
+    // 提示词原样发送——上游(handraw-style 等)的提示词已按库内契约调优,
+    // 不叠加 _addQualityKeywords 的通用质量词,避免稀释风格锚点。
+    const body = {
+      model,
+      prompt,
+      size: tier,
+      ratio,
+      extra_body: { response_format: 'url' }
+    };
+
+    console.log(`🎨 Agnes Image 请求: model=${model}, size=${tier}, ratio=${ratio}`);
+    console.log(`   提示词: ${prompt.substring(0, 50)}...`);
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body),
+      signal: options.signal || AbortSignal.timeout(180000)
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      throw new Error(`Agnes Image API ${resp.status}: ${errText.substring(0, 200)}`);
+    }
+
+    const data = await resp.json();
+
+    const images = [];
+    for (const item of (data.data || [])) {
+      if (item.url) {
+        const downloaded = await this._downloadImage(item.url, options, providerName);
+        images.push({
+          url: item.url,
+          filePath: downloaded.filePath,
+          fileName: downloaded.fileName,
+          size: tier
+        });
+      } else if (item.b64_json) {
+        const saved = this._saveBase64Image(item.b64_json, options, providerName);
+        images.push({ filePath: saved.filePath, fileName: saved.fileName, size: tier });
+      }
+    }
+    if (images.length === 0) {
+      throw new Error('Agnes 响应未包含图片数据(url 与 b64_json 均为空)');
+    }
+
+    return {
+      success: true,
+      images,
+      provider: providerName,
+      model,
+      revisedPrompt: prompt,
+      raw: data
+    };
+  }
+
+  /** b64 响应落盘(命名/扩展名嗅探与 _downloadImage 同口径) */
+  _saveBase64Image(b64, options, providerName) {
+    const outputDir = options.outputDir || this._outputDir;
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+    const timestamp = Date.now();
+    let randomSuffix;
+    try {
+      randomSuffix = crypto.randomBytes(4).toString('hex').slice(0, 8);
+    } catch (e) {
+      randomSuffix = Math.random().toString(36).slice(2, 10);
+    }
+    let fileName = `${providerName}_${timestamp}_${randomSuffix}.png`;
+    let filePath = path.join(outputDir, fileName);
+
+    const buffer = Buffer.from(b64, 'base64');
+    const sniffExt = buffer[0] === 0x89 && buffer[1] === 0x50 ? '.png'
+      : buffer[0] === 0xff && buffer[1] === 0xd8 ? '.jpg'
+      : '.png';
+    if (path.extname(fileName) !== sniffExt) {
+      fileName = fileName.slice(0, -4) + sniffExt;
+      filePath = path.join(outputDir, fileName);
+    }
+    fs.writeFileSync(filePath, buffer);
+    console.log(`✅ 图片已保存: ${filePath}`);
+    return { filePath, fileName };
   }
 
   _addQualityKeywords(prompt, options) {

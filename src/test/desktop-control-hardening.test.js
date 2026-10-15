@@ -12,7 +12,7 @@
  */
 
 const { composeSendKeys } = require('../core/computer-use/windows-backend');
-const { validateToolInput, getToolContract } = require('../core/tool-contract');
+const { validateToolInput } = require('../core/tool-contract');
 const { buildRegistryParameters, buildContractSchema } = require('../core/desktop/schema');
 
 // 审批系统 mock 为立即拒绝——避免测试真的等待人工审批超时(此前等满 jest 5s 超时)。

@@ -1,7 +1,7 @@
 /**
  * decision-tools.test.js — DecisionTrace/DecisionVerify 工具契约与行为
  */
-const { UnifiedMemoryStore } = require('../core/memory/unified-store');
+require('../core/memory/unified-store');
 const { persistDecision } = require('../core/memory/provenance-chain');
 const { createFoldState, foldRunEvent } = require('../core/memory/decision-recorder');
 const { registry } = require('../tools/registry');
@@ -18,7 +18,7 @@ function seed(store) {
 
 describe('工具注册与契约', () => {
   const contract = require('../core/tool-contract');
-  const tools = require('../tools/decision-tools');
+require('../tools/decision-tools');
 
   test('registry 注册存在且 schema 完整', () => {
     for (const name of ['DecisionTrace', 'DecisionVerify']) {

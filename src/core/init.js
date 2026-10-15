@@ -446,6 +446,15 @@ async function initializeCoreSystems(appConfig) {
       try { if (scenarioReminderEngine) scenarioReminderEngine.stop(); } catch (e) { console.warn('[init] 场景提醒引擎停止失败:', e.message); }
     });
 
+    // 2026-10-09 会话收口: 优雅停机时把防抖中的会话提交立即冲刷(记忆不随进程蒸发)
+    registerCleanup(() => {
+      try {
+        const { flushPendingCommits } = require('./memory/session-commit');
+        const flushed = flushPendingCommits();
+        if (flushed.length > 0) logger.info(`  会话收口: 停机冲刷 ${flushed.length} 个待提交会话`);
+      } catch (e) { logger.warn('会话收口冲刷失败:', e.message); }
+    });
+
     // eslint-disable-next-line no-unused-vars
     const contextManager = getUnifiedContextManager({
       contextWindow: appConfig.contextWindow || 128000,

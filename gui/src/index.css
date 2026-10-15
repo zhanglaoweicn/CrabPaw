@@ -1,4 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* ── 字体：完全离线（自托管 Inter 子集）─────────────────────────────
+   2026-09-30 离线地基修复: 此前为 @import Google Fonts —— 对"买 U 盘、不装环境、
+   随身离线"的产品是硬伤：无网/内网下要等网络超时才回落系统字体，且字体异步到达会
+   让数字先以系统字体渲染再跳变（FOUT），而数字恰是老板最看重的部分。
+   现改为自托管 woff2 子集（gui/src/assets/fonts/，由 scripts/fetch-inter-fonts.js
+   生成，重新获取: node scripts/fetch-inter-fonts.js --force），运行时零网络请求。
+   只取 latin/latin-ext：中文沿用系统字体栈，不引入 MB 级中文字库。
+   同时 gui/electron/main/index.ts 的 CSP 已收敛（font-src 不再放行 fonts.gstatic.com）。 */
+@import './assets/fonts.css';
 
 @tailwind base;
 @tailwind components;
@@ -7,7 +15,7 @@
 /* ═══════════════════════════════════════════════════════════
    CrabPaw GUI v3 — UI/UX Pro Max 注入
    设计风格: Refined Dark Minimalism + Glassmorphism touches
-   字体: Inter (Google Fonts)
+   字体: Inter（自托管子集，见 gui/src/assets/fonts/）
    间距: 4pt system
    动效: 150-300ms ease micro-interactions
    ═══════════════════════════════════════════════════════════ */
@@ -141,11 +149,97 @@
   --spring-bounce: cubic-bezier(0.68, -0.55, 0.27, 1.55);  /* 明显回弹，适合亮点 */
 
   /* ── Glass Effect ── */
-  --glass-blur: 20px;      /* 玻璃模糊升级（原 12px） */
+  --glass-blur: 9px;       /* 基值 = L1 标准档（JS 会尽快写入 data-motion 覆盖）；
+                              写成 L2 的 20px 会导致首帧先全模糊再降到标准，出现可见闪动 */
   --glass-border: rgba(255,255,255,0.08);
   --glass-bg: rgba(24, 24, 27, 0.65);
   --glass-highlight: rgba(255, 255, 255, 0.12);
   --glass-shadow: rgba(0, 0, 0, 0.25);
+  /* 动效阶梯基值（同 L1；详见下方 [data-motion] 段） */
+  --motion-decor: 1;
+  --motion-enter: 0.22s;
+  --motion-shadow-layers: 0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   动效保真阶梯（Motion Fidelity Ladder）— 2026-09-30
+   ──────────────────────────────────────────────────────────────────────
+   为什么需要：UI 有 98 处 backdrop-filter / 340 个 keyframes / 154 处 transition，
+   此前**没有任何降级机制**，也不响应 prefers-reduced-motion。而本产品跑在"买 U 盘、
+   不装环境"的形态上——用户插的常是集显/机械盘老机器。项目已有前车之鉴：
+   ShellFloatCard/styles.css 注释记录了"大面积 backdrop-filter 与视频/地图合成层
+   死锁 → 黑屏"（MediaStage 事故）。
+
+   怎么用：档位由 JS 写到 <html data-motion="L0|L1|L2">（见 src/lib/motion-tier.ts），
+   这里只负责让令牌随之变化。新增玻璃/转场代码**请用令牌**（--glass-blur 等），
+   不要写字面量——字面量只受 L0 的强制清零管辖，拿不到 L1/L2 的差异化。
+
+   L2 全效：显式声明当前基线值（防止有人误以为 L2 是"新加的档"而改基准）
+   L1 标准：单层玻璃、明显更轻的模糊（默认档，也是采不到帧率时的保守档）
+   L0 精简：完全去模糊 + 零转场 + 去装饰性循环动画（无障碍偏好 / 弱机 / 手动）
+   ══════════════════════════════════════════════════════════════════════ */
+[data-motion="L2"] {
+  --glass-blur: 20px;
+  --motion-decor: 1;                /* 装饰性循环动画开关：0 关闭 */
+  --motion-enter: 0.38s;            /* 面板/卡片进场时长 */
+  --motion-shadow-layers: 1;        /* 多层光影开关 */
+}
+[data-motion="L1"] {
+  --glass-blur: 9px;
+  --motion-decor: 1;
+  --motion-enter: 0.22s;
+  --motion-shadow-layers: 0;
+}
+[data-motion="L0"] {
+  --glass-blur: 0px;
+  --motion-decor: 0;
+  --motion-enter: 0.001s;           /* 不是 0s：保留 transitionend/animationend 事件语义 */
+  --motion-shadow-layers: 0;
+}
+
+/* L0：强制清掉**全部**模糊（含各文件里写字面量的 98 处）。
+   单条 !important 规则而非逐个改声明——改动面最小、不可能漏。
+   注：blur 清零后玻璃退化为半透明实底，信息层次由背景色与描边承担，不丢可读性。 */
+[data-motion="L0"] *,
+[data-motion="L0"] *::before,
+[data-motion="L0"] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* L0：去装饰性循环动画。只关"循环"的——一次性进场动画保留，否则界面状态变化
+   会失去因果提示（信息可获取性是无障碍底线，不能因为关动效而丢反馈）。
+   已知循环动画清单见 docs/UI-INNOVATION-SPEC.md 附录 A。 */
+[data-motion="L0"] .scene-scan,
+[data-motion="L0"] .scene-dot-pulse,
+[data-motion="L0"] .kpi-glow,
+[data-motion="L0"] .tp-scan,
+[data-motion="L0"] .tp-pulse,
+[data-motion="L0"] .tp-flow,
+[data-motion="L0"] .voice-orb-halo,
+[data-motion="L0"] .splash-pulse {
+  animation: none !important;
+}
+
+/* 系统级无障碍偏好：即使用户没手动改过设置，也尊重系统选择（JS 侧同样处理，
+   这里再兜一层——保证"JS 还没跑起来"的首帧就已经是精简态，避免闪一下再降级） */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --glass-blur: 0px;
+    --motion-decor: 0;
+    --motion-enter: 0.001s;
+    --motion-shadow-layers: 0;
+  }
+  :root *,
+  :root *::before,
+  :root *::after {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    animation-duration: 0.001s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001s !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* 玻璃面板体系（电影级：上亮下暗渐变高光描边） */

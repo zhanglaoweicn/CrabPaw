@@ -81,6 +81,46 @@ const CONNECTORS = {
       },
     ],
   },
+  // 2026-10-09: OpenViking（火山引擎开源的 Agent 上下文数据库）——首个 HTTP 形态
+  // 连接器：无需本地装组件，直连已部署的 openviking-server（自托管或火山托管）。
+  // 接通后获得 ov_find/ov_read/ov_write 等工具，跨 Agent 共享长期记忆/知识/技能上下文。
+  openviking: {
+    id: 'openviking',
+    name: 'OpenViking 上下文数据库',
+    vendorNote: '火山引擎开源（AGPLv3）的 Self-evolving Context Database，支持自托管（uv 装 openviking-server）或火山托管 SaaS',
+    benefits: '接通后可检索/读写 OpenViking 里的记忆、知识与技能上下文（ov_find/ov_read/ov_write 等工具），多个 Agent 共享同一份长期上下文',
+    docsUrls: [
+      'https://github.com/volcengine/OpenViking',
+      'https://openviking.ai',
+    ],
+    matchPatterns: [/openviking/i, /viking:\/\//i, /volcengine[-_ ]?viking/i],
+    keywords: ['openviking', 'viking', '上下文数据库'],
+    intentPattern: /(连接|接入|配置|安装|对接|装).{0,16}(openviking|viking|上下文数据库)|(openviking|viking|上下文数据库).{0,16}(连接|接入|配置|安装|对接|mcp)/i,
+    install: { type: 'none', package: '' },
+    serverName: 'openviking',
+    commandPlan: { kind: 'http' },
+    // HTTP 形态：url 字段 + Bearer 凭证字段
+    http: { urlField: 'OPENVIKING_URL', tokenField: 'OPENVIKING_API_KEY' },
+    envSchema: [
+      {
+        key: 'OPENVIKING_URL',
+        label: 'OpenViking 服务地址',
+        hint: 'openviking-server 的 MCP 端点，自托管如 http://127.0.0.1:8000，或火山托管给你的服务 URL',
+        required: true,
+        secret: false,
+        normalize: (v) => String(v || '').trim().replace(/\/+$/, ''),
+        validate: (v) => (/^https?:\/\//i.test(String(v || '').trim()) ? null : '地址要以 http:// 或 https:// 开头'),
+      },
+      {
+        key: 'OPENVIKING_API_KEY',
+        label: 'OpenViking 用户 Key',
+        hint: '必须是 user key（root key 只读管理面，读不了记忆），在服务端账号页生成',
+        required: true,
+        secret: true,
+        validate: (v) => (String(v || '').trim() ? null : '用户 Key 不能为空'),
+      },
+    ],
+  },
 };
 
 /** 连接器目录摘要（实时状态由工具层补充） */
@@ -170,11 +210,27 @@ function assertInstallAllowed(preset, pkg) {
 }
 
 /**
- * 构建 stdio 服务器配置。显式接收 pythonPath/libDir（纯函数，便于测试）。
- * PYTHONPATH 指向 data/mcp-libs/<id>——pip --target 安装位置，
- * 经 StdioTransport 的 config.env 合并进子进程。
+ * 构建 MCP 服务器配置。显式接收 pythonPath/libDir（纯函数，便于测试）。
+ * - python-module 形态：PYTHONPATH 指向 data/mcp-libs/<id>——pip --target 安装位置，
+ *   经 StdioTransport 的 config.env 合并进子进程。
+ * - http 形态（2026-10-09 OpenViking）：直连远端 MCP 端点，凭证作 Bearer 头，
+ *   走 HttpTransport（mcp-manager 按 config.url 自动选择）。
  */
-function buildServerConfig(preset, normalizedCreds, { pythonPath, libDir }) {
+function buildServerConfig(preset, normalizedCreds, { pythonPath, libDir } = {}) {
+  if (preset.commandPlan.kind === 'http') {
+    const { urlField, tokenField } = preset.http || {};
+    // 尾斜杠归一：validateCredentials 已 normalize，但直调本函数也保持一致
+    const url = (urlField ? normalizedCreds[urlField] : null)?.replace(/\/+$/, '');
+    if (!url) throw new Error(`连接器 ${preset.id} 缺少服务地址字段 ${urlField}`);
+    return {
+      url,
+      headers: tokenField && normalizedCreds[tokenField]
+        ? { Authorization: `Bearer ${normalizedCreds[tokenField]}` }
+        : {},
+      timeout: 60000,
+      connectTimeout: 20000,
+    };
+  }
   if (preset.commandPlan.kind !== 'python-module') {
     throw new Error(`连接器 ${preset.id} 的启动形态不支持: ${preset.commandPlan.kind}`);
   }

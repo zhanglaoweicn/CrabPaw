@@ -28,7 +28,6 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { getDataDir } = require('../config');
 
 const STATE_FILENAME = 'proactive-kernel.json';
 const LEGACY_ACK_FILENAME = 'proactive-ack.json';

@@ -29,7 +29,7 @@ async function handlePanelStateGet(req, res, _ctx) {
   }
 }
 
-async function handlePanelStateSet(req, res, ctx) {
+async function handlePanelStateSet(req, res, _ctx) {
   try {
     const { readJsonBody } = require('../http-utils');
     const body = await readJsonBody(req);

@@ -153,7 +153,9 @@ function migrateOldFormat() {
 // ──────────────────────────────────────────────
 
 function ensureDefaultProfile() {
-  const profiles = listProfiles();
+  // 2026-10-09: 改用 _listProfileDirs——此前读 listProfiles(),而 listProfiles 现在
+  // 会在无 default 时触发 bootstrap,二者互调会无限递归
+  const profiles = _listProfileDirs();
   if (profiles.some(p => p.isDefault)) return;
 
   const id = 'default_' + shortId(6);
@@ -236,8 +238,7 @@ function resolveProfileId(input) {
  *
  * @returns {Array<Object>}
  */
-function listProfiles() {
-  ensureDir(PROFILES_DIR);
+function _listProfileDirs() {
   const activeId = getActiveProfile();
   const profiles = [];
 
@@ -273,6 +274,30 @@ function listProfiles() {
   });
 
   return profiles;
+}
+
+/**
+ * List all profiles.
+ *
+ * 2026-10-09 自举修复: 此前空 profiles 目录(新机器/init 未跑/目录被清)会返回 [],
+ * 违背"恒包含 default"不变量(eval ps_005 锁定)——GUI 拿不到可用配置档。
+ * 现在列举结果缺 default 时自举补建(磁盘创建失败则降级返回实况并告警,
+ * 不抛错阻断调用方)。init() 的显式 bootstrap 行为不变。
+ *
+ * @returns {Array<Object>}
+ */
+function listProfiles() {
+  ensureDir(PROFILES_DIR);
+  const profiles = _listProfileDirs();
+  if (profiles.some(p => p.isDefault)) return profiles;
+
+  try {
+    ensureDefaultProfile();
+  } catch (e) {
+    console.warn('[profile-manager] default 配置档自举失败(返回实况):', e.message);
+    return profiles;
+  }
+  return _listProfileDirs();
 }
 
 /**

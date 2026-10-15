@@ -675,7 +675,11 @@ class BrowserControlManager extends EventEmitter {
         // 2026-09-08 许可合规: BINARY-LICENSE.md 禁止再分发, 发行 zip 不捆绑二进制——
         // 首次浏览器任务后台从官方渠道/国内镜像预下载(约500MB,一次), 完成前回退系统 Chrome/Edge
         console.log('[BrowserControl] CloakBrowser 二进制未缓存——后台预下载(约500MB,一次), 本次任务回退系统 Chrome/Edge');
-        const { ensureCloakBinary } = require('./cloak-installer');
+        // 2026-09-30 深度检查修复: require('./cloak-installer') 路径错一级(该文件在
+        // src/core/, 本文件在 src/core/browser-control/), 抛错被下方 .catch 吞掉 →
+        // CloakBrowser 后台预下载**永不触发**, 每次任务都默默回退系统 Chrome/Edge,
+        // 但日志仍打印"已发起预下载", 掩盖了真实状态。
+        const { ensureCloakBinary } = require('../cloak-installer');
         ensureCloakBinary(cb).then((channel) => {
           console.log(`[BrowserControl] CloakBrowser 二进制就绪(渠道: ${channel}), 后续会话启用隐身模式`);
         }).catch(e => console.warn('[BrowserControl] CloakBrowser 后台下载失败(本次任务不受影响, 下次会话重试):', e?.message));

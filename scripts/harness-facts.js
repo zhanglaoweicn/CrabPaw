@@ -36,7 +36,15 @@ function collectFacts() {
 
   try {
     const t = require('../src/core/tool-contract');
-    const primary = Object.keys(t.TOOL_CONTRACTS || {}).length;
+    // 口径修正（2026-10-15）：TOOL_CONTRACTS 运行期注册表内含遗留别名键，
+    // 直接 Object.keys().length 会把别名误计入"主键"（曾致 255/24/279 口径自相矛盾）。
+    // 主键 = 注册表键中排除全部别名键后的数量；合计 = 主键 + 别名。
+    const allKeys = Object.keys(t.TOOL_CONTRACTS || {});
+    const aliasKeys = new Set([
+      ...Object.keys(t.LEGACY_SNAKE_ALIASES || {}),
+      ...Object.keys(t.LEGACY_KEBAB_ALIASES || {}),
+    ]);
+    const primary = allKeys.filter((k) => !aliasKeys.has(k)).length;
     const snake = Object.keys(t.LEGACY_SNAKE_ALIASES || {}).length;
     const kebab = Object.keys(t.LEGACY_KEBAB_ALIASES || {}).length;
     facts.toolContracts = { primary, snake, kebab, aliases: snake + kebab, total: primary + snake + kebab };

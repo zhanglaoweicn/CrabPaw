@@ -179,7 +179,9 @@ describe('MCP 连接器向导', () => {
         credentials: { KINGDEE_SERVER_URL: 'https://x/k3cloud/', KINGDEE_ACCT_ID: 'a', KINGDEE_USERNAME: 'u', KINGDEE_PASSWORD: 'p' },
       });
       expect(r.success).toBe(false);
-      expect(r.content).toContain('连接金蝶失败');
+      // 2026-10-09: 报错文案按连接器泛化（金蝶/HTTP 形态各自分流），不再写死"连接金蝶失败"
+      expect(r.content).toContain('连接失败');
+      expect(r.content).toContain('金蝶云星空');
       expect(global.__mockMgr.saveServerConfig).not.toHaveBeenCalled();
     });
 

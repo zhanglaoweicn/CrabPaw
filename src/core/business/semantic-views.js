@@ -52,10 +52,38 @@ function buildSelectForTable(cols, unionCols, tableName) {
 }
 
 /**
+ * 用真实表结构对账注册表的列定义。
+ *
+ * 为什么必须有这一步（2026-09-30 实机故障）：
+ *   注册表记的列名来自"导入时解析的表头"，但表可能被重新导入成**不同的表头**
+ *   （实测：表里是 `到期日`，注册表记成 `到期日期`）。SQLite 的 CREATE VIEW
+ *   **不校验列引用**，于是视图"建成功"、查询时才报 `no such column` ——
+ *   表现为"合同卡一直取不到数"，而错误只在日志里。
+ *
+ * 对策：建视图前拿真实列名过滤，只保留两端都存在的列，并把差异**如实上报**
+ * （不静默丢弃——注册表与库不一致本身就是需要被看见的事实）。
+ *
+ * @param {Array<{name:string, canonical?:string|null}>} declared 注册表列定义
+ * @param {string[]} actual 真实列名
+ * @returns {{ kept: Array, missing: string[] }}
+ */
+function reconcileColumns(declared, actual) {
+  const actualSet = new Set((actual || []).map((c) => String(c)));
+  const kept = [];
+  const missing = [];
+  for (const col of declared || []) {
+    if (!col || !col.name) continue;
+    if (actualSet.has(String(col.name))) kept.push(col);
+    else missing.push(String(col.name));
+  }
+  return { kept, missing };
+}
+
+/**
  * 重建某业务库中全部语义视图
  * @param {{ dbPath: string, tables: Array<{name, role, direction, dbPath, external, superseded, columns}> }} params
  *   tables 传 business-data-registry.listTables() 的结果（已按 dbPath 过滤或在此过滤）
- * @returns {{ rebuilt: string[], dropped: string[], errors: string[] }}
+ * @returns {{ rebuilt: string[], dropped: string[], errors: string[], reconciled: Array<{table:string, view:string, missing:string[]}> }}
  */
 function rebuildSemanticViews({ dbPath, tables }) {
   let Database;
@@ -65,6 +93,7 @@ function rebuildSemanticViews({ dbPath, tables }) {
   const rebuilt = [];
   const dropped = [];
   const errors = [];
+  const reconciled = [];
   let db;
   try {
     db = new Database(dbPath);
@@ -96,6 +125,21 @@ function rebuildSemanticViews({ dbPath, tables }) {
         const present = group.tables.filter((t) => objectExists(db, t.name, 'table'));
         if (present.length === 0) continue;
 
+        // 注册表列名对真实表结构校验（防止 CREATE VIEW 引用不存在的列——
+        // SQLite 建视图不校验列，坏视图会在查询时才炸，见 reconcileColumns 注释）
+        const usable = [];
+        for (const t of present) {
+          const actual = db.prepare(`PRAGMA table_info(${quoteIdent(t.name)})`).all().map((c) => String(c.name));
+          const { kept, missing } = reconcileColumns(t.columns, actual);
+          if (missing.length > 0) {
+            reconciled.push({ table: t.name, view: group.viewName, missing });
+            errors.push(`${t.name}: 注册表列名在真实表中不存在——${missing.join('、')}（已从视图定义剔除）`);
+          }
+          if (kept.length === 0) continue;   // 该表一列都对不上 → 不参与合并
+          usable.push({ ...t, columns: kept });
+        }
+        if (usable.length === 0) continue;
+
         // 统一列集 = 各表 canonical 并集（固定顺序优先，其余按首见序）
         const unionSet = [];
         const seen = new Set();
@@ -103,16 +147,16 @@ function rebuildSemanticViews({ dbPath, tables }) {
           if (c && !seen.has(c)) { seen.add(c); unionSet.push(c); }
         };
         for (const canonical of CANONICAL_ORDER) {
-          if (present.some((t) => t.columns.some((col) => col.canonical === canonical))) pushCanonical(canonical);
+          if (usable.some((t) => t.columns.some((col) => col.canonical === canonical))) pushCanonical(canonical);
         }
-        for (const t of present) {
+        for (const t of usable) {
           for (const col of t.columns) pushCanonical(col.canonical);
         }
         // 没有任何可对齐列（全部 canonical 为 null）→ 放弃建视图，不值得
         const meaningful = unionSet.filter((c) => c !== 'date');
         if (meaningful.length === 0) continue;
 
-        const selects = present.map((t) => buildSelectForTable(t.columns, unionSet, t.name));
+        const selects = usable.map((t) => buildSelectForTable(t.columns, unionSet, t.name));
         const sql = `CREATE VIEW ${quoteIdent(group.viewName)} AS ${selects.join(' UNION ALL ')}`;
         db.exec(`DROP VIEW IF EXISTS ${quoteIdent(group.viewName)}`);
         db.exec(sql);
@@ -126,7 +170,7 @@ function rebuildSemanticViews({ dbPath, tables }) {
   } finally {
     try { if (db) db.close(); } catch (e) { console.warn('[semantic-views] 关闭数据库失败:', e.message || e); }
   }
-  return { rebuilt, dropped, errors };
+  return { rebuilt, dropped, errors, reconciled };
 }
 
-module.exports = { rebuildSemanticViews, buildSelectForTable, CANONICAL_ORDER };
+module.exports = { rebuildSemanticViews, buildSelectForTable, reconcileColumns, CANONICAL_ORDER };

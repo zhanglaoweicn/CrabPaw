@@ -15,6 +15,23 @@ CrabPaw 是面向中小企业的智能助理平台，支持多模型、多渠道
 - 数据目录在程序目录旁的 `CrabPaw-Data/`，删除即卸载，不写注册表
 - 启动后在设置页填入模型 API Key 即可开始对话
 
+**数据都在 U 盘上，换机器、换盘符零感知**（整盘拷贝/带走即可，无需重装或迁移）：
+
+```
+<U盘>/
+├─ CrabPaw.exe
+├─ resources/            # 程序与运行时（node/python/ffmpeg/浏览器内核）
+└─ CrabPaw-Data/         # 全部用户数据，随盘走；删除本目录 = 卸载
+   ├─ config.json        # 配置与 API Key（凭据以 AES-256-GCM 落盘）
+   ├─ .crabpaw/          # 后端数据目录（记忆库/历史/技能/生成物…）
+   │  ├─ workspace/      # 上传附件、生成文档
+   │  ├─ business/       # 导入的经营数据（应收/合同/销售）
+   │  └─ …
+   └─ crabpaw.log
+```
+
+> 老版本 U 盘的业务数据可能位于 `CrabPaw-Data/business/`（历史布局）。程序会**自动兼容读取**该位置，升级后数据不丢、无需手工搬迁。
+
 ### 方式 B：从源码运行（开发者）
 
 **环境要求**：Node.js ≥ 18（建议 24 LTS，与打包环境一致可避免 native 模块预编译问题）、npm ≥ 9；Windows 10+ / macOS 12+ / Ubuntu 20.04+。

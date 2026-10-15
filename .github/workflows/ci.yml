@@ -1,4 +1,4 @@
-﻿name: CrabPaw CI
+name: CrabPaw CI
 
 on:
   push:
@@ -22,6 +22,9 @@ jobs:
       # 2026-09-03 P0 治理编码化: 层契约闸门(冻结存量/禁止增量) + 结构性事实校验
       - run: npm run layer:check
       - run: npm run facts:check
+      # 2026-09-30 深度检查修复: 插件门禁此前只在 precommit 跑, 而 AGENTS.md/HARNESS.md
+      # 四处声称"已接入 CI" —— 文档与事实不符, 且 CI 因此拦不住插件清单破损。
+      - run: npm run plugin:verify
 
   test:
     runs-on: ubuntu-latest

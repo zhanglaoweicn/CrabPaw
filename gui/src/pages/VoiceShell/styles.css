@@ -26,6 +26,47 @@
   z-index: var(--z-shell);
 }
 
+/* ── HUD 单数字常驻条停靠位（2026-09-30，P1-3）─────────────────────────
+   放在左下角：靠近视线但不遮挡中央语音球与右栏对话卡；与右下"浮动卡栈"
+   （--z-float-stack: 40）错开，避免叠在一起。
+   层级取 --z-shell-float（5）：属于壳内元素，不应盖住模态/侧板。 */
+.hud-dock {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: var(--z-shell-float, 5);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 关闭按钮默认淡出，hover 停靠位时才显形——常驻条本身要安静 */
+.hud-dock__close {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted, #71717a);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast, 150ms) ease;
+}
+.hud-dock:hover .hud-dock__close,
+.hud-dock__close:focus-visible {
+  opacity: 1;
+}
+.hud-dock__close:hover {
+  color: var(--text-primary, #fafafa);
+}
+
+/* 窄屏（笔记本/平板横屏）下常驻条可能与左栏重叠：左栏收起位才显示 */
+@media (max-width: 1280px) {
+  .hud-dock { bottom: 12px; left: 12px; }
+}
+
 /* ── 三栏布局容器 ── */
 .voice-shell-layout {
   flex: 1;
@@ -678,6 +719,37 @@
   scrollbar-width: thin;
   /* 默认 pointer-events 由 JS 动态控制（交互 kind 为 auto，其余 none） */
   animation: holo-stage-in 0.4s ease-out both;
+}
+
+/* ── 可见关闭确认（2026-09-30，P1-1 语音·视觉契约）────────────────────────
+   问题：此前关闭路径直接从 visibleSurfaces 过滤掉 → 卡片**瞬间消失**，且当它是
+   最后一张时容器一并卸载（`cardWallSurfaces.length > 0`）→ 连离场动画都不可能跑。
+   对语音优先的界面，"说关掉"却没有可被余光捕获的反馈，是信任流失的主因
+   （git 历史 `fix(ui): 面板「说关了没关」收口`）。
+   现做法：关闭的卡片在 DOM 里多留 CLOSE_ANIM_MS（见 VoiceShell/index.tsx），
+   期间播放收拢动画——视觉上"被吸走"，并留一段淡残影提供空间记忆。
+   时长变量由 index.css 的动效阶梯提供：L0 下 --motion-enter 极小 → 近乎瞬变，
+   既满足无障碍偏好，也保住 animationend/unmount 时序不被拖长。 */
+.holo-stage-item.is-closing {
+  animation: holo-card-close var(--motion-enter, 0.22s) cubic-bezier(0.4, 0, 0.2, 1) both;
+  pointer-events: none;   /* 关闭中不接受点击，避免"又点开了"的竞态 */
+  will-change: transform, opacity;
+}
+@keyframes holo-card-close {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  35% {
+    /* 先轻微"回吸"一下再收拢 —— 让眼睛捕捉到"有东西正在走"，而不是直接消失 */
+    opacity: 0.94;
+    transform: scale(0.965);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.9);
+    filter: blur(2px);
+  }
 }
 /* B1(2026-09-05): 卡片墙超限收纳条——ambient 卡缩略为 chip(纯视觉层,
    surface 生命周期零接触)。玻璃视觉语言与 holo-stage 对齐。 */
@@ -3142,4 +3214,98 @@ body.side-sheet-media .voice-shell[data-layout='simple'] .voice-shell-chat-col {
 .chatcard-decision-action:hover {
   background: rgba(255, 255, 255, 0.12);
   border-color: rgba(255, 255, 255, 0.28);
+}
+
+/* ── 2026-10-10 生图任务卡(ImageGenCard)——生成过程 + 成图展示 ── */
+.imagegen-card {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  backdrop-filter: var(--glass-blur, 9px);
+}
+.imagegen-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.imagegen-card__title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+.imagegen-card__progress {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+.imagegen-card__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+.imagegen-card__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.imagegen-card__canvas {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.imagegen-card__cell--running .imagegen-card__canvas {
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+}
+.imagegen-card__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: zoom-in;
+  transition: transform var(--motion-enter, 160ms) ease;
+}
+.imagegen-card__img:hover {
+  transform: scale(1.03);
+}
+.imagegen-card__spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: rgba(255, 255, 255, 0.7);
+  animation: imagegen-spin 0.9s linear infinite;
+}
+@keyframes imagegen-spin {
+  to { transform: rotate(360deg); }
+}
+.imagegen-card__mark--fail {
+  font-size: 18px;
+  opacity: 0.55;
+}
+.imagegen-card__prompt {
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+/* L0 精简档: 关掉毛玻璃与旋转动画(动效预算纪律) */
+html[data-motion='L0'] .imagegen-card {
+  backdrop-filter: none;
+}
+html[data-motion='L0'] .imagegen-card__spinner {
+  animation: none;
+  border-top-color: rgba(255, 255, 255, 0.4);
 }

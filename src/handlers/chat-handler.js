@@ -376,7 +376,11 @@ function inferHeaders(parsed, maxCols) {
 function runDigestFor(userId, roundId) {
  try {
   if (!roundId) return '';
-  const { globalActivityStream } = require('./activity-stream');
+  // 2026-09-30 深度检查修复: require('./activity-stream') 路径错一级(该文件在
+  // src/core/, 本文件在 src/handlers/), 抛错被下方 catch 吞成 return '' →
+  // runDigestFor() 对任何 roundId 恒返回空串, RunStore 的"这轮做了什么"摘要
+  // 自 2026-08-13 引入以来从未真正写入过。
+  const { globalActivityStream } = require('../core/activity-stream');
   const activities = (globalActivityStream.activities || globalActivityStream.getRecent?.(100) || [])
    .filter((a) => a && a.roundId === roundId && a.summary)
    .map((a) => a.summary)
@@ -783,13 +787,10 @@ async function _processChannelMessage({ channelType, senderId, content, files, c
  if (isGreetingMessage) return;
  const now = Date.now();
  if (status === 'start') {
- const toolHints = {
- 'Read': '正在读取文件...', 'Write': '正在写入文件...', 'Grep': '正在搜索内容...',
- 'WebSearch': '正在搜索网络...', 'WebFetch': '正在获取网页...', 'Bash': '正在执行命令...',
- 'StockQuery': '正在查询股票数据...', 'Weather': '正在查询天气...',
- 'TodoRead': '正在读取任务列表...', 'TodoWrite': '正在更新任务...',
- };
- const hint = toolHints[toolName] || `正在执行 ${toolName}...`;
+ // 2026-10-01: 提示文案收敛到 core/tool-hints 单一事实源(此前此处手写一份映射,
+ // 与 ai.js 两条通道并存, 同一工具在不同通道文案不一致)
+ const { toolRunningHint } = require('../core/tool-hints');
+ const hint = toolRunningHint(toolName);
  if (ctx.wecom.isConfigured() && now - lastToolCallTime > 3000) {
  ctx.wecom.send(chatId || senderId, `🔧 ${hint}`, chatType).catch(e => console.debug('[chat] Send failed:', e?.message));
  lastToolCallTime = now;
@@ -1130,15 +1131,24 @@ async function handleChat(req, res, ctx) {
  
  let intentHint = null;
  try {
+ // 2026-10-10: 图像生成意图跳过 taskflow 工作流建议——此前"生成一组电商图片"
+ // 被意图分析器命中营销报告模板(置信 0.95), 消息尾部追加"《中国电商运营报告》"
+ // 工作流提示, 该字样随后污染下游全链: isFileGenIntent(报告=文档名词 → 文档
+ // 生成卡片误弹)与 skill-router(报告 → 路由到 marketing, 生图技能不激活)。
+ const { isImageGenerationIntent } = require('../core/skill-router');
+ if (isImageGenerationIntent(processedMessage)) {
+ console.log('🖼 [chat] 图像生成意图: 跳过工作流建议注入(走 handraw-style 生图链路)');
+ } else {
  const intentAnalyzer = getIntentAnalyzer();
  const suggestion = intentAnalyzer.suggest(processedMessage, { userId });
- 
+
  if (suggestion.shouldCreateFlow && suggestion.confidence >= 0.4) {
  intentHint = suggestion;
- console.log('💡 工作流建议:', suggestion.intentType, 
+ console.log('💡 工作流建议:', suggestion.intentType,
  '(置信度:', (suggestion.confidence * 100).toFixed(0) + '%',
  '模板:', suggestion.templateHint?.name || '无',
  '专家:', suggestion.expertHint?.name || '无', ')');
+ }
  }
  } catch (intentErr) {
  console.warn('⚠️ 意图分析失败(不影响聊天):', intentErr.message);

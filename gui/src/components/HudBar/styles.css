@@ -1,0 +1,153 @@
+/**
+ * HudBar 样式（2026-09-30，P1-3）
+ *
+ * 设计约束（规格 §5.3）：
+ *   · 极薄：高度 22px，不抢画面；贴边放置由调用方决定
+ *   · 数字可读：等宽数字（tabular-nums）+ 不小于 13px，避免跳字与误读
+ *   · 四态可被截图区分：failed/empty 用中性灰，stale 用琥珀，ok 用常规色
+ *   · 遵动效阶梯：不用 backdrop-filter（常驻元素长期占 GPU），L0 下也无动画
+ */
+.hud-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 11px;
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.1));
+  background: var(--bg-card, #18181b);
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  /* 常驻元素不做毛玻璃：长期占 GPU 合成层，且在 L0 档会被强制清零反而不一致 */
+  transition: border-color var(--transition-fast, 150ms) ease;
+}
+
+button.hud-bar {
+  cursor: pointer;
+  font-family: inherit;
+}
+button.hud-bar:hover {
+  border-color: var(--glass-border, rgba(255, 255, 255, 0.18));
+}
+button.hud-bar:focus-visible {
+  outline: 2px solid var(--accent, #00e5ff);
+  outline-offset: 1px;
+}
+
+.hud-bar__label {
+  color: var(--text-muted, #71717a);
+  font-size: 11px;
+}
+
+/* 数字：等宽 + 略大，保证"瞄一眼"能读准 */
+.hud-bar__value {
+  color: var(--text-primary, #fafafa);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: 0.2px;
+}
+
+.hud-bar__delta {
+  color: var(--text-secondary, #a1a1aa);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-bar__risk {
+  color: #f59e0b;   /* 琥珀：风险点 */
+}
+
+.hud-bar__fresh {
+  color: var(--text-muted, #71717a);
+  font-size: 10.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.hud-bar__stale-icon {
+  font-size: 10px;
+}
+
+.hud-bar__chevron {
+  color: var(--text-muted, #71717a);
+  font-size: 9px;
+}
+
+/* ── 出处入口（P2 "从哪来"）────────────────────────────────────────────
+   与主数字分离摆放：它是"追问"，不是"主操作"，不该和数字抢点击。
+   自身也遵守四态语言——失败/陈旧时常驻可见（此时最需要溯源）。 */
+.hud-bar-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.hud-bar__prov {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  border: 1px dashed var(--border-primary, rgba(255, 255, 255, 0.14));
+  background: transparent;
+  color: var(--text-muted, #71717a);
+  font-size: 10.5px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--transition-fast, 150ms) ease, border-color var(--transition-fast, 150ms) ease;
+}
+.hud-bar__prov:hover,
+.hud-bar__prov:focus-visible {
+  color: var(--text-primary, #fafafa);
+  border-color: var(--glass-border, rgba(255, 255, 255, 0.28));
+}
+/* 数字不可信时（失败/陈旧），出处入口提亮——引导老板先去核对来源 */
+.hud-bar--failed + .hud-bar__prov,
+.hud-bar--stale + .hud-bar__prov {
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+/* ── 四态：颜色是唯一的"状态语言"，必须能截图区分 ── */
+.hud-bar--ok {
+  border-color: var(--border-primary, rgba(255, 255, 255, 0.1));
+}
+
+/* 陈旧：数字照显示（旧数比无数有用），但整体转琥珀并带沙漏 */
+.hud-bar--stale {
+  border-color: rgba(245, 158, 11, 0.45);
+}
+.hud-bar--stale .hud-bar__value,
+.hud-bar--stale .hud-bar__fresh {
+  color: #fbbf24;
+}
+
+/* 失败：中性灰 + 破折号，**不显示 0** */
+.hud-bar--failed {
+  border-color: rgba(148, 163, 184, 0.35);
+  color: var(--text-muted, #71717a);
+}
+.hud-bar--failed .hud-bar__value {
+  color: var(--text-muted, #71717a);
+  font-weight: 500;
+}
+
+/* 未导入/无数据：与 failed 同族但更淡——两者都是"没有数"，
+   靠 value 文案（未导入 / 无数据 vs —）区分，颜色不必再分一套 */
+.hud-bar--empty {
+  border-color: rgba(148, 163, 184, 0.28);
+}
+.hud-bar--empty .hud-bar__value {
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 取数中：不留白，用省略号占位（避免"先显示 0 再变数"的闪烁误读） */
+.hud-bar--loading .hud-bar__value {
+  color: var(--text-muted, #71717a);
+  letter-spacing: 1px;
+}

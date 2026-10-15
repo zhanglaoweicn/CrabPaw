@@ -45,6 +45,8 @@ require('./email-tools');
 require('./document-tools');
 require('./document-analyze-tools');
 require('./knowledge-tools');
+// 2026-10-09 分层加载协议工具: 上下文下钻(ref→全文/子级) + 目录浏览(记忆树/知识库)
+require('./context-depth-tools');
 require('./decision-tools');
 require('./trending-tools');
 require('./music-tools');

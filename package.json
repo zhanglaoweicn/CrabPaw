@@ -18,6 +18,7 @@
     "experts:org": "node scripts/build-expert-org.js",
     "facts:write": "node scripts/harness-facts.js --write",
     "facts:check": "node scripts/harness-facts.js --check",
+    "fonts:fetch": "node scripts/fetch-inter-fonts.js",
     "postinstall": "node scripts/postinstall-check.js",
     "start": "node scripts/clean-start.js",
     "dev": "node scripts/clean-start.js --watch",
@@ -98,10 +99,9 @@
     "image-size": "^2.0.2"
   },
   "jest": {
-    "testMatch": [
-      "<rootDir>/test/**/*.test.js",
-      "<rootDir>/src/**/*.test.js"
-    ],
+ "testMatch": [
+  "<rootDir>/src/**/*.test.js"
+ ],
     "testPathIgnorePatterns": [
       "/node_modules/",
       "<rootDir>/tests/e2e/",

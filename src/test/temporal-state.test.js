@@ -136,7 +136,6 @@ describe('queryStateAt 存储级时点快照', () => {
   });
 
   test('memories 表已含时态列（schema 迁移生效）', () => {
-    const now = Date.now();
     store.run(
       `INSERT INTO memories (id, type, title, content, valid_from, valid_to, recorded_at, created_at, updated_at)
        VALUES ('m1', 'general', 't', 'c', 100, 200, 150, 0, 0)`,

@@ -9,9 +9,12 @@ const { memoryManager, addMessage: unifiedAddMessage } = require('./unified-memo
  // 2026-09-18: 历史长内容压缩器(会话膨胀治理层1——装配侧存量瘦身)
  const { compactHistoryMessages } = require('./history-compactor');
 const { registry, addConfirmedPattern } = require('../tools');
-const { loadSkills, buildSkillsPrompt, buildSkillsPromptScoped } = require('./skills');
+const { loadSkills, buildSkillsPromptScoped } = require('./skills');
 const { smartExtractArguments, substituteArguments } = require('../skills/argument-substitution');
 const lifecycleManager = require('./lifecycle-manager');
+// 2026-10-01: 工具执行提示单一事实源——此前原生分支/DSML 兜底/企微路径三份手写文案表
+// 各自维护, 同一调用可能出现「正在执行命令」与「正在执行 Bash」两条不一致提示(实机)。
+const { toolRunningHint, toolCallSignature } = require('./tool-hints');
 const { buildSystemPrompt, buildLayeredSystemPrompt, buildRuntimeInfo } = require('./system-prompt');
 const { enhancedTaskExecutor } = require('../services/enhanced-task-executor');
 const { createModelRouter, getModelRouter } = require('./model-router');
@@ -20,7 +23,7 @@ const { recordUsage } = require('./usage-stats');
 const { contextCache } = require('./context-cache');
 // getMaxToolCallsPerTurn / getToolsetManager 已移至 ./ai/tool-definitions.js（由子模块内部使用）
 const { loadSmartContext, buildCompactMemoryPrompt } = require('./memory-smart-loader');
-const { ToolCallGuardrail, ToolGuardrailDecision, buildAuditedSyntheticResult, appendGuardrailGuidance } = require('./tool-guardrails');
+const { ToolCallGuardrail, buildAuditedSyntheticResult, appendGuardrailGuidance } = require('./tool-guardrails');
 // 2026-09-04 P3: 激活专家的工具面(enforcement 数据源)——岗位=人设+工具面三元组
 const { getActiveExpertToolsets } = require('./expert-context');
 const { getCircuitBreakerRegistry } = require('./tool-circuit-breaker');
@@ -62,7 +65,7 @@ const { getWebhookAnomalyTracker } = require('./webhook-anomaly');
 const { globalCommitmentTracker } = require('./commitment/commitment-tracker');
 const { globalContextWindowGuard } = require('./context-window-guard');
 const { globalKeyRotationManager, executeWithApiKeyRotation, collectProviderApiKeysForExecution } = require('./api-key-rotation');
-const { sanitizeToolCallsForProvider, sanitizeMessagesForProvider, validateToolCallIds, repairToolCallIds, repairToolCallArguments } = require('./tool-call-id');
+const { sanitizeToolCallsForProvider, sanitizeMessagesForProvider, validateToolCallIds, repairToolCallIds } = require('./tool-call-id');
 // InboundDebouncer / getChannelDebouncer / resolveChannelDebounceMs 未使用
 const { globalHeartbeatPatrol } = require('./heartbeat-patrol');
 const { globalDiagnosticCustodian } = require('./diagnostic-custodian');
@@ -168,6 +171,17 @@ let toolCallCallback = null;
 let subAgentCallback = null;
 let _currentChannel = 'none'; // 跟踪当前对话通道，供工具 context 使用
 let _currentUserId = ''; // 跟踪当前用户ID，供工具 context 使用
+
+// 2026-10-09 修复并发 userId 串号(实测: 主对话工具执行的审计 actor 被并发运行的
+// 记忆抽取 ai.chat(userId='memory-extractor') 覆盖 → 审计失真): 模块级可变全局
+// 在并发请求下天然互踩(代码内注释亦自认"并发覆盖风险已知")。改用 AsyncLocalStorage
+// 按异步执行链隔离——chat/chatStream 入口 enterWith 写入, 工具 context 构建时读取;
+// 读取失败回落模块级全局(兼容未包裹的入口)。ALS 作用于各自的异步链, 并发请求互不影响。
+const { AsyncLocalStorage } = require('async_hooks');
+const _userIdALS = new AsyncLocalStorage();
+function _contextUserId() {
+  return _userIdALS.getStore()?.userId || _currentUserId || '';
+}
 
 function setToolCallCallback(callback) {
  toolCallCallback = callback;
@@ -415,6 +429,14 @@ function stripSystemInjected(message) {
 
 function isFileGenIntent(message) {
   if (typeof message !== 'string') return false;
+  // 2026-10-10: 图像生成意图不是文档生成任务——"生成一组电商图片"曾因消息尾部
+  // 被追加的工作流建议(含"报告"字样)命中下方文档名词表 → 文档生成卡片误弹。
+  // 与 chat-handler 的跳过互为纵深: 即便建议文本已拼入消息, 此处仍按用户真实
+  // 意图否决。
+  try {
+    const { isImageGenerationIntent } = require('./skill-router');
+    if (isImageGenerationIntent(stripSystemInjected(message))) return false;
+  } catch (e) { /* router 不可用时按原逻辑继续 */ }
   // 2026-08-20: 剥离系统注入片段——chat-handler 会把工作流建议/附件说明/语音提示
   // 拼进消息尾部，其中"创建/生成/文件"类词会污染判定（实机：上传 .docx + "分析该
   // 文档" → intentAnalyzer 误判 complex_workflow → 注入"此任务可能需要创建工作流"
@@ -696,7 +718,7 @@ async function executeToolCall(toolCall) {
  projectRoot: PROJECT_ROOT,
  workspaceDir: WORKSPACE_DIR,
  channel: _currentChannel || 'none',
- userId: _currentUserId || '',
+ userId: _contextUserId(),
  };
 
  if (tool.validateInput) {
@@ -750,7 +772,7 @@ async function executeToolCall(toolCall) {
  projectRoot: PROJECT_ROOT,
  workspaceDir: WORKSPACE_DIR,
  channel: _currentChannel || 'none',
- userId: _currentUserId || '',
+ userId: _contextUserId(),
  // B2/C2/C4(Runtime差距分析): run 上下文穿透到工具层——registry 审批挂起状态更新
  // (waiting_approval)、审计条目 runId 关联都依赖它。无活跃回合(纯 CLI/cron 场景
  // 无 recordLLMEvent('start'))时为 null,下游按 no-op 处理。
@@ -1350,7 +1372,7 @@ function injectSkillGuidance(messages, userMessage) {
     // 2026-08-25 修复: minScore 0.6 与「无 executor 技能降权 0.15」(R18 skill-router)
     // 语义冲突——强意图命中也被滤掉,知识注入链实际断路(实测 bilibili 强命中仅 0.142,
     // eval skp_009 必失败)。0.15 降权只用于技能间竞争排序,不应阻断知识注入。
-    const recs = globalSkillRouter.getRecommendedSkills(userMessage, { maxResults: 2, minScore: 0.1, userId: _currentUserId });
+    const recs = globalSkillRouter.getRecommendedSkills(userMessage, { maxResults: 2, minScore: 0.1, userId: _contextUserId() });
     if (!recs || recs.length === 0) return false;
     const top = recs[0];
 
@@ -1412,6 +1434,9 @@ ${skillKnowledge}
 async function chat(config, skills, userId, message, options = {}) {
   const filegen = require('./filegen-events');
   const isSilent = !!(options && options.silent);
+  // 2026-10-09: 本请求的 userId 写入 ALS(异步链隔离)——工具 context/审计 actor
+  // 经 _contextUserId() 读取, 不再被并发请求的 ai.chat 覆盖。
+  if (userId) _userIdALS.enterWith({ userId });
   if (!isSilent) { try { filegen.beginTurn(); } catch (e) { /* 不阻塞 */ } }
   try {
     return await chatImpl(config, skills, userId, message, options);
@@ -1553,7 +1578,7 @@ async function chatImpl(config, skills, userId, message, options = {}) {
  projectRoot: PROJECT_ROOT,
  workspaceDir: WORKSPACE_DIR,
  channel: _currentChannel || 'none',
- userId: _currentUserId || '',
+ userId: _contextUserId(),
  };
 
  const tool = toolSystem.get(pending.toolName);
@@ -1712,7 +1737,7 @@ async function chatImpl(config, skills, userId, message, options = {}) {
  // video_play 工具集(SceneMedia/BilibiliSearch)被注入 → 提取 LLM 顺手调了
  // SceneMedia → 已关闭的视频卡复活。silent 任务只做提取, 同 noTools 一样禁工具,
  // 且不死守消息文本做意图注入——用户消息的 UI 副作用(弹卡)与提取任务必须隔离。
- const toolDefinitions = (options.noTools || silent) ? [] : buildToolDefinitions(currentChannel, message, { expertToolsets: getActiveExpertToolsets(_currentUserId) });
+ const toolDefinitions = (options.noTools || silent) ? [] : buildToolDefinitions(currentChannel, message, { expertToolsets: getActiveExpertToolsets(_contextUserId()) });
  console.log('🔧 已加载', toolDefinitions.length, '个工具定义 (通道:', Array.isArray(config.chatChannel) ? config.chatChannel.join(',') : currentChannel, ')');
  console.log(`⏱️ [性能] 工具定义构建耗时: ${Date.now() - toolDefStart}ms`);
  console.log(`📏 [性能] 工具定义大小: ${JSON.stringify(toolDefinitions).length} 字符`);
@@ -1808,6 +1833,18 @@ async function chatImpl(config, skills, userId, message, options = {}) {
  if (!response.ok) {
  const err = new Error(`HTTP ${response.status}`);
  err.status = response.status;
+ // 2026-10-08: 读出 provider 错误响应体（截断 500 字符）——此前只抛状态码，
+ // 400（上下文超限）与参数类错误无法区分，排障只能靠猜。
+ // 2026-10-09: 把响应体内的 provider 错误消息解析进 err.message——该消息会
+ // 经兜底路径成为用户可见回复,裸 "HTTP 400" 对用户与排障都没有信息量
+ // (实测案例: DeepSeek 思考模式 reasoning_content 缺失, 用户只看到 HTTP 400)。
+ try {
+ const errBody = await response.text();
+ err.bodySnippet = String(errBody || '').slice(0, 500);
+ let providerMsg = '';
+ try { const j = JSON.parse(errBody); providerMsg = j.error?.message || j.message || ''; } catch (e) { providerMsg = String(errBody || '').slice(0, 200); }
+ if (providerMsg) err.message = `AI 模型请求失败 (HTTP ${response.status}): ${providerMsg}`;
+ } catch (e) { /* 响应体不可读时仅保留状态码 */ }
  throw err;
  }
  return response;
@@ -1867,7 +1904,8 @@ async function chatImpl(config, skills, userId, message, options = {}) {
  }
  const errorDetail = rotationError.message || String(rotationError);
  const causeDetail = rotationError.cause ? ` | cause: ${rotationError.cause.code || ''} ${rotationError.cause.message || ''}` : '';
- console.error('❌ AI 请求失败 (密钥轮转耗尽):', errorDetail + causeDetail);
+ const bodyDetail = rotationError.bodySnippet ? ` | body: ${rotationError.bodySnippet}` : '';
+ console.error('❌ AI 请求失败 (密钥轮转耗尽):', errorDetail + causeDetail + bodyDetail);
  const userFriendly = errorDetail === 'fetch failed'
   ? '网络连接失败，请检查网络后重试'
   : errorDetail;
@@ -2040,6 +2078,8 @@ async function chatImpl(config, skills, userId, message, options = {}) {
  messages.push({
  role: 'assistant',
  content: '',
+ // 2026-10-09: 思考模式回传推理内容(同 4171 处流式路径修复)
+ ...(assistantMessage.reasoning_content ? { reasoning_content: assistantMessage.reasoning_content } : {}),
  tool_calls: [tc]
  });
  messages.push({
@@ -2074,6 +2114,8 @@ async function chatImpl(config, skills, userId, message, options = {}) {
  messages.push({
  role: 'assistant',
  content: assistantMessage.content || '',
+ // 2026-10-09: 思考模式回传推理内容(缺失即续轮 400)
+ ...(assistantMessage.reasoning_content ? { reasoning_content: assistantMessage.reasoning_content } : {}),
  tool_calls: loopFilteredCalls
  });
  
@@ -2248,6 +2290,8 @@ const emptyResults = toolResults.filter(
  messages.push({
  role: 'assistant',
  content: nextMessage.content || '',
+ // 2026-10-09: 思考模式回传推理内容(缺失即续轮 400)
+ ...(nextMessage.reasoning_content ? { reasoning_content: nextMessage.reasoning_content } : {}),
  tool_calls: currentToolCalls
  });
  } else {
@@ -3118,14 +3162,17 @@ async function chatStreamImpl(config, skills, userId, message, onChunk, options 
  // {type, function} 并 sanitize,不能再次 filter(t => t.schema)(会把全部工具清空
  // → LLM 收到 0 工具 → 只能文本回复"已生成"——"胡说"的终极根因!)
  const streamChannel = Array.isArray(config.chatChannel) ? config.chatChannel[0] : (config.chatChannel || 'none');
- const toolDefinitions = buildToolDefinitions(streamChannel, message, { expertToolsets: getActiveExpertToolsets(_currentUserId) });
+ const toolDefinitions = buildToolDefinitions(streamChannel, message, { expertToolsets: getActiveExpertToolsets(_contextUserId()) });
 
   // 2026-08-15 P1-6: 流式路径设置工具 execContext 全局——此前仅 chat() 设置
   // (ai.js:1260-1261), 流式工具 channel='none'/userId=''(preToolHook sessionId
   // 恒 '')。与 chat() 同一来源; 并发覆盖风险已知(模块级全局), 至少保证
   // chatStream 内设置值随请求更新。
+  // 2026-10-09: 并发覆盖风险由此真正修复——写入 ALS(异步链隔离, 并发请求互不影响),
+  // 模块级全局保留作未包裹路径的回落。
   _currentChannel = streamChannel;
   _currentUserId = userId || '';
+  if (userId) _userIdALS.enterWith({ userId });
   // 2026-08-15 P1-5: 本轮 RepeatFailureGuard 清零——per-user 隔离后, 用户上一轮
   // 的连续失败计数不应影响本轮 forceFinalAnswer 判定。
   _getFailureGuard(userId).reset();
@@ -3303,6 +3350,18 @@ async function chatStreamImpl(config, skills, userId, message, onChunk, options 
  if (!response.ok) {
  const err = new Error(`HTTP ${response.status}`);
  err.status = response.status;
+ // 2026-10-08: 读出 provider 错误响应体（截断 500 字符）——此前只抛状态码，
+ // 400（上下文超限）与参数类错误无法区分，排障只能靠猜。
+ // 2026-10-09: 把响应体内的 provider 错误消息解析进 err.message——该消息会
+ // 经兜底路径成为用户可见回复,裸 "HTTP 400" 对用户与排障都没有信息量
+ // (实测案例: DeepSeek 思考模式 reasoning_content 缺失, 用户只看到 HTTP 400)。
+ try {
+ const errBody = await response.text();
+ err.bodySnippet = String(errBody || '').slice(0, 500);
+ let providerMsg = '';
+ try { const j = JSON.parse(errBody); providerMsg = j.error?.message || j.message || ''; } catch (e) { providerMsg = String(errBody || '').slice(0, 200); }
+ if (providerMsg) err.message = `AI 模型请求失败 (HTTP ${response.status}): ${providerMsg}`;
+ } catch (e) { /* 响应体不可读时仅保留状态码 */ }
  throw err;
  }
  return response;
@@ -3479,6 +3538,18 @@ async function chatStreamImpl(config, skills, userId, message, onChunk, options 
  if (!response.ok) {
  const err = new Error(`HTTP ${response.status}`);
  err.status = response.status;
+ // 2026-10-08: 读出 provider 错误响应体（截断 500 字符）——此前只抛状态码，
+ // 400（上下文超限）与参数类错误无法区分，排障只能靠猜。
+ // 2026-10-09: 把响应体内的 provider 错误消息解析进 err.message——该消息会
+ // 经兜底路径成为用户可见回复,裸 "HTTP 400" 对用户与排障都没有信息量
+ // (实测案例: DeepSeek 思考模式 reasoning_content 缺失, 用户只看到 HTTP 400)。
+ try {
+ const errBody = await response.text();
+ err.bodySnippet = String(errBody || '').slice(0, 500);
+ let providerMsg = '';
+ try { const j = JSON.parse(errBody); providerMsg = j.error?.message || j.message || ''; } catch (e) { providerMsg = String(errBody || '').slice(0, 200); }
+ if (providerMsg) err.message = `AI 模型请求失败 (HTTP ${response.status}): ${providerMsg}`;
+ } catch (e) { /* 响应体不可读时仅保留状态码 */ }
  throw err;
  }
  return response;
@@ -3553,7 +3624,7 @@ async function chatStreamImpl(config, skills, userId, message, onChunk, options 
  }
  }
 
- async function processWithStreaming(currentMessages, depth = 0, isEmptyRetry = 0) {
+ async function processWithStreaming(currentMessages, depth = 0, isEmptyRetry = 0, recentSignatures = new Set()) {
  // 2026-09-07 实测修复: 此处原为硬编码 `depth > 5` 强制终答——它位于 tool_choice
  // 分级与 filegen 收答保底轮的上游, 导致契约 finalAnswerRound 与保底轮从未执行
  // (13:20 轮实测 depth=6 直达此处, HTML 未落盘就收答)。改为与契约对齐:
@@ -3721,6 +3792,18 @@ async function chatStreamImpl(config, skills, userId, message, onChunk, options 
  if (!response.ok) {
  const err = new Error(`HTTP ${response.status}`);
  err.status = response.status;
+ // 2026-10-08: 读出 provider 错误响应体（截断 500 字符）——此前只抛状态码，
+ // 400（上下文超限）与参数类错误无法区分，排障只能靠猜。
+ // 2026-10-09: 把响应体内的 provider 错误消息解析进 err.message——该消息会
+ // 经兜底路径成为用户可见回复,裸 "HTTP 400" 对用户与排障都没有信息量
+ // (实测案例: DeepSeek 思考模式 reasoning_content 缺失, 用户只看到 HTTP 400)。
+ try {
+ const errBody = await response.text();
+ err.bodySnippet = String(errBody || '').slice(0, 500);
+ let providerMsg = '';
+ try { const j = JSON.parse(errBody); providerMsg = j.error?.message || j.message || ''; } catch (e) { providerMsg = String(errBody || '').slice(0, 200); }
+ if (providerMsg) err.message = `AI 模型请求失败 (HTTP ${response.status}): ${providerMsg}`;
+ } catch (e) { /* 响应体不可读时仅保留状态码 */ }
  throw err;
  }
  return response;
@@ -3746,7 +3829,8 @@ async function chatStreamImpl(config, skills, userId, message, onChunk, options 
  } catch (rotationError) {
  const errorDetail = rotationError.message || String(rotationError);
  const causeDetail = rotationError.cause ? ` | cause: ${rotationError.cause.code || ''} ${rotationError.cause.message || ''}` : '';
- console.error('❌ AI 流式请求失败 (密钥轮转耗尽):', errorDetail + causeDetail);
+ const bodyDetail = rotationError.bodySnippet ? ` | body: ${rotationError.bodySnippet}` : '';
+ console.error('❌ AI 流式请求失败 (密钥轮转耗尽):', errorDetail + causeDetail + bodyDetail);
  // ── 2026-08-15 P2-5: Harness LLM 调用失败(流式此前无调用) ——
  // 传入完整上下文(消息/压缩函数/兜底提供者/上下文引擎), best-effort 不抛——
  // RecoveryChain 消费端为 Task 3 职责。
@@ -3804,6 +3888,11 @@ async function chatStreamImpl(config, skills, userId, message, onChunk, options 
  let buffer = '';
  let lastStreamUsage = null; // 2026-08-15 P1-2/P2-5: 流末 usage(stream_options.include_usage)
 let toolCalls = [];
+// 2026-10-09 修复 DeepSeek 思考模式工具轮 400: thinking 模型(delta.reasoning_content)
+// 的推理内容必须随 assistant(tool_calls) 消息回传下一轮——此前流式解析只收
+// content/tool_calls, reasoning_content 被丢弃 → 续轮被 DeepSeek 以
+// "reasoning_content must be passed back" 400 拒绝, 用户看到裸 "HTTP 400"。
+let streamReasoning = '';
 let currentPhase = '';
  const phaseLabels = {
  plan: { label: '📋 规划阶段', agent: 'planner' },
@@ -3837,6 +3926,8 @@ let currentPhase = '';
  // 2026-08-15 P1-2/P2-5: 捕获流末 usage(include_usage 时最后一个 chunk 携带)
  if (parsed.usage) lastStreamUsage = parsed.usage;
  const delta = parsed.choices?.[0]?.delta;
+ // 2026-10-09: 捕获思考模型的推理增量(DeepSeek delta.reasoning_content)
+ if (delta?.reasoning_content) streamReasoning += delta.reasoning_content;
 
  if (delta?.content) {
  rawContent += delta.content;
@@ -3956,6 +4047,10 @@ let currentPhase = '';
  continue;
  }
  seenToolCalls.set(callSignature, true);
+ // 2026-10-01: 登记到跨轮签名表(随递归帧传递)——下一轮模型若在文本里以 DSML 形式
+ // 复述同一调用, DSML 兜底凭此识别为"回声"并跳过, 不再重复执行/重复提示(实机:
+ // 对话窗口同时出现「正在执行命令」与「正在执行 Bash」且命令真的跑了两遍)
+ recentSignatures.add(toolCallSignature(toolName, tc.function?.arguments));
  
  if (loopStatus.isWarning) {
  console.warn(`🔄 [循环检测] 工具 "${hashInfo.name}" 已调用 ${loopStatus.count} 次，警告`);
@@ -4129,25 +4224,18 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
  return forceFinalAnswer(currentMessages);
  }
  
+ // 2026-10-01: 提示文案收敛到 tool-hints 单一事实源(此前本表与 DSML 兜底/企微路径
+ // 三份手写映射各自维护, Bash 在不同通道分别显示「正在执行命令」与「正在执行 Bash」)。
  const toolNames = filteredToolCalls.map(tc => tc.function?.name || 'unknown');
- const toolHints = {
- 'StockQuery': '正在查询股票数据...',
- 'WebSearch': '正在搜索网络...',
- 'Read': '正在读取文件...',
- 'LS': '正在列出目录...',
- 'Grep': '正在搜索文本...',
- 'SearchCodebase': '正在搜索代码库...',
- 'Glob': '正在匹配文件...',
- 'Bash': '正在执行命令...',
- 'WebFetch': '正在获取网页内容...',
- };
- 
- const processingHint = toolNames.map(name => toolHints[name] || `正在执行 ${name}...`).join(' ');
+ const processingHint = toolNames.map(name => toolRunningHint(name)).join(' ');
  onChunk({ type: 'thinking', content: `⏳ ${processingHint}` });
  
  currentMessages.push({
  role: 'assistant',
  content: fullContent || '',
+ // 2026-10-09: 回传本轮流式思考的 reasoning_content(DeepSeek 思考模式硬要求,
+ // 缺失即 400 "reasoning_content must be passed back"; 非思考模型无此字段不受影响)
+ ...(streamReasoning ? { reasoning_content: streamReasoning } : {}),
  tool_calls: filteredToolCalls
  });
  
@@ -4235,11 +4323,23 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
  if (toolName === 'ImageGenerate') {
  lifecycleManager.managedSet('sessionImageGenerateSuccess', userId, true);
  console.log('📸 [图片生成] 成功，后续将阻止 DesktopControl/BrowserControl');
+ // 2026-10-09 修复"生成的图片在对话流中不可见"的真正源头: file_generated(type=image)
+ // 全史 0 条(事件日志实测)。根因: 到达本块的 toolResult 是**字符串**(工具中间件
+ // 为 LLM tool 消息把结果转成了 JSON 字符串, 双层: {success, content: "<内层 JSON>"}),
+ // 旧实现只处理"对象带 .content"形态 → 字符串直接跳过解析 → image_path 恒 undefined
+ // → file_generated 从不发出 → 附件气泡/对话流图片全链路无数据。现按形态鲁棒解析:
+ // 字符串 → parse; content 仍为 JSON 字符串 → 再 parse; 路径字段多形态兜底。
  let imgData = toolResult;
- if (toolResult && toolResult.content && typeof toolResult.content === 'string') {
- try { imgData = JSON.parse(toolResult.content); } catch(e) { console.warn("[ai]", e?.message) }
+ try {
+ if (typeof imgData === 'string') imgData = JSON.parse(imgData);
+ if (imgData && typeof imgData.content === 'string' && imgData.content.trim().startsWith('{')) {
+ try { const inner = JSON.parse(imgData.content); if (inner && typeof inner === 'object') imgData = inner; } catch (e) { /* 内层非 JSON 时保持外层 */ }
  }
- const imgFilePath = imgData.image_path || (imgData.images && imgData.images[0] && imgData.images[0].file_path);
+ } catch (e) { console.warn('[ai] ImageGenerate 结果解析失败:', e?.message); }
+ const imgFilePath = (imgData && (
+ imgData.image_path ||
+ (imgData.images && imgData.images[0] && (imgData.images[0].file_path || imgData.images[0].filePath))
+ )) || null;
  if (imgFilePath) {
  const imgName = imgFilePath.split(/[/\\]/).pop();
  onChunk({ content: '', done: false, file_generated: { type: 'image', path: imgFilePath, name: imgName, size: imgData.total_size || 0 } });
@@ -4251,6 +4351,8 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
  name: imgName,
  size: imgData.total_size || 0,
  }).catch(e => console.warn('⚠️ [MediaNotifier] 图片通知失败:', e.message));
+ } else {
+ console.warn('📸 [图片生成] 成功但未解析出图片路径(结果形态: ' + typeof toolResult + ')——file_generated 未广播');
  }
  }
  if (toolName === 'PosterGenerate') {
@@ -4421,7 +4523,7 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
  }
  
  console.log('🔧 继续处理，深度:', depth + 1);
- return processWithStreaming(currentMessages, depth + 1);
+ return processWithStreaming(currentMessages, depth + 1, 0, recentSignatures);
  }
  
  // 无工具调用 — 最终回复路径（参考 OpenHuman empty response detection）
@@ -4445,7 +4547,7 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
      role: 'system',
      content: '⚠️ 检测到你未实际调用任何工具。这是不允许的——生成请求必须实际调用 Write 工具(或其他生成工具)创建用户要求的文件，不要将文章/网页全文直接输出到对话中；历史会话中生成的文件不属于本轮，你不能引用它们作为本轮结果。工具执行成功后才能向用户确认完成。',
    })
-   return processWithStreaming(currentMessages, depth + 1)
+   return processWithStreaming(currentMessages, depth + 1, 0, recentSignatures)
  }
  // 2026-08-04 P1: 二次防护——重试轮(required)仍幻觉(deepseek 违反 required 复述)
  // → 清理历史上下文污染(SmartLoader 加载的"生成报告成功"记录是幻觉源头)
@@ -4489,7 +4591,7 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
          break;
        }
      }
-     return processWithStreaming(retryMessages, depth, 1);
+     return processWithStreaming(retryMessages, depth, 1, recentSignatures);
    }
    console.warn('[流式] AI 返回空回复且无工具调用 — 返回错误提示');
    const emptyMsg = '抱歉，AI 未返回有效回复。请尝试换一种方式描述您的需求，或稍后重试。';
@@ -4497,8 +4599,11 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
    return emptyMsg;
  }
 
- // 返回对象，包含清理后的内容和原始内容（用于 DSML 兜底解析）
- return { content: fullContent, raw: rawContent };
+ // 返回对象，包含清理后的内容和原始内容（用于 DSML 兜底解析）。
+ // 2026-10-09: 附带 echoSignatures——帧内 recentSignatures 记录了本请求所有已执行的
+ // 原生 tool_call 签名,调用方的 DSML 兜底需要它做跨轮回声去重(此前该集合只 add
+ // 从未查询,注释宣称的"上一轮原生已执行、本轮 DSML 复述→跳过"从未生效)。
+ return { content: fullContent, raw: rawContent, echoSignatures: recentSignatures };
  }
 
  try {
@@ -4561,6 +4666,16 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
  let finalContent = fullContent;
  // 使用原始内容（含 DSML 标签）解析工具调用，因为 scrubber 可能已清理 fullContent 中的标签
  const dsmlToolCalls = parseDSMLToolCalls(rawContent);
+ // 2026-10-09 回声去重闭环: recentSignatures 此前在调用方作用域不可见(ReferenceError
+ // 存量 bug),修复时曾改为请求级独立集合——但那只覆盖"同响应内 DSML 重复",漏掉
+ // "上一轮原生 tool_call 已执行、本轮 DSML 复述"主场景(processWithStreaming 帧内的
+ // recentSignatures 只 add 从未被 has 查询)。现在由 processWithStreaming 返回
+ // echoSignatures,DSML 兜底对"帧内原生签名 ∪ 本兜底已执行签名"统一查重。
+ const dsmlRecentSignatures = new Set();
+ if (streamResult && typeof streamResult === 'object' && streamResult.echoSignatures instanceof Set) {
+ // 不用 Set.prototype.union——CI 矩阵含 Node 18/20,该 ES2024 方法不可用
+ for (const sig of streamResult.echoSignatures) dsmlRecentSignatures.add(sig);
+ }
  if (dsmlToolCalls.length > 0) {
  console.log('🔧 [DSML兜底] 检测到文本中的工具调用:', dsmlToolCalls.map(tc => tc.name).join(', '));
  // 先清理 DSML 标签，避免用户看到原始标签
@@ -4588,9 +4703,18 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
  dsmlFailedResults.push({ name: tc.name, error: `缺少必填参数: ${dsmlMissing.join('、')}` });
  continue;
  }
+ // 2026-10-01: 跨轮回声去重——模型偶发在上一轮原生 tool_call 已执行后, 本轮又在文本
+ // 里以 DSML 形式复述同一调用。命中签名即静默跳过(不发提示/不执行), 消灭「正在执行
+ // 命令」+「正在执行 Bash」双提示与命令重复执行(签名规范化见 tool-hints.toolCallSignature)。
+ const dsmlSignature = toolCallSignature(tc.name, tc.params || tc.arguments);
+ if (dsmlRecentSignatures.has(dsmlSignature)) {
+ console.warn(`🔄 [DSML兜底] ${tc.name} 与最近已执行调用相同(模型回声), 跳过`);
+ continue;
+ }
+ dsmlRecentSignatures.add(dsmlSignature);
     onChunk({ type: 'tool_call', toolName: tc.name, toolId: dsmlToolId, toolArgs: JSON.stringify(tc.params || tc.arguments) });
  try {
- onChunk({ type: 'thinking', content: `⏳ 正在执行 ${tc.name}...` });
+ onChunk({ type: 'thinking', content: `⏳ ${toolRunningHint(tc.name)}` });
  const result = await executeToolCall({ name: tc.name, params: tc.params || tc.arguments });
  const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
  // 改进成功判断：不仅检查error字符串，还要检查exit code（针对Bash工具）
@@ -4987,6 +5111,10 @@ ${videoInfo ? videoInfo.split('\n').filter(line => !line.includes('[video]') && 
  // 2026-08-15 P2-5: 会话(请求)结束指标——onSessionEnd 此前无任何调用方,
  // harness session 指标永不上报。best-effort 不阻断主流程。
  try { globalHarnessLifecycle.onSessionEnd({ sessionId: sessionId || userId, userId }); } catch (e) { console.warn('[ai] Harness onSessionEnd failed:', e?.message || e); }
+ // 2026-10-09 会话收口(OpenViking Stop-hook 语义): triggerStopHooks 此前全仓无调用方,
+ // _stopHooks 注册表形同虚设。每轮对话收尾时触发,外部(插件/技能)可经 registerStopHook
+ // 订阅"对话静默点"。记忆巩固不在钩子内直跑——统一由 session-commit 防抖收口。
+ try { globalHooks.triggerStopHooks({ sessionId: sessionId || userId, userId }).catch(e => console.warn('[ai] Stop hooks failed:', e?.message || e)); } catch (e) { console.warn('[ai] Stop hooks dispatch failed:', e?.message || e); }
  }
 }
 

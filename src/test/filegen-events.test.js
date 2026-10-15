@@ -306,7 +306,7 @@ describe('R2-4 多文件产物（files[] 累积 + done 复用窗口）', () => {
 
   test('done 事件携带 files 数组（file 字段兼容保留）', () => {
     // broadcastEvent 为普通函数（sse-broadcast.js:21），直接 spyOn 拦截调用
-    const { broadcastEvent } = require('../core/sse-broadcast');
+    require('../core/sse-broadcast');
     const spy = jest.spyOn(require('../core/sse-broadcast'), 'broadcastEvent').mockImplementation(() => {});
     const fg = require('../core/filegen-events');
     const t = fg.ensureFileGenTask({ title: 'b.html', format: 'html', phase: 'writing' });
@@ -438,7 +438,7 @@ describe('final-review: 复用任务采纳实际产物 format（意图占位 md 
   test('settleTurn: 有实质活动但无产物（搜完未写）→ paused「可继续生成」', () => {
     const fg = require('../core/filegen-events');
     fg.beginTurn();
-    const id = fg.ensureFileGenTask({ title: '报告', format: 'md', phase: 'collect' });
+    fg.ensureFileGenTask({ title: '报告', format: 'md', phase: 'collect' });
     fg.sourceFileGen('关键词', [{ title: '来源', url: 'https://x', snippet: 's' }]);
     fg.settleTurn();
     const st = fg.getFileGenStatus();
@@ -487,7 +487,7 @@ describe('final-review: 复用任务采纳实际产物 format（意图占位 md 
   test('paused 任务收到搜索/写作插桩 → 恢复流程（需求补充后继续）', () => {
     const fg = require('../core/filegen-events');
     fg.beginTurn();
-    const id = fg.ensureFileGenTask({ title: 't', format: 'md', phase: 'collect' });
+    fg.ensureFileGenTask({ title: 't', format: 'md', phase: 'collect' });
     fg.settleTurn(); // → paused
     expect(fg.getFileGenStatus().phase).toBe('paused');
     // 用户补充后模型开搜 → 恢复 writing

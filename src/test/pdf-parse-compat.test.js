@@ -66,7 +66,7 @@ describe('PDF 解析兼容封装（pdf-parse v1/v2 双形态）', () => {
   });
 
   test('v1 形态（可调用函数）：直接调用并原样返回', async () => {
-    const v1Fn = async (buffer) => ({ text: 'v1 text', numpages: 1, info: {} });
+    const v1Fn = async (_buffer) => ({ text: 'v1 text', numpages: 1, info: {} });
     mockCurrent = v1Fn;
     const buf = Buffer.from('x');
     await withTools(async ({ parsePdfBuffer }) => {

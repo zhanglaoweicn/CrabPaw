@@ -11,7 +11,7 @@
  */
 const { escapeHtml } = require('./escape');
 
-function bulletsHtml(bullets, accent) {
+function bulletsHtml(bullets, _accent) {
   if (!bullets || bullets.length === 0) return '';
   return `<ul class="bullets">${bullets.map(b => `<li>${escapeHtml(b)}</li>`).join('')}</ul>`;
 }

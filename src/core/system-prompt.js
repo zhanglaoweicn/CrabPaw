@@ -1,9 +1,7 @@
 // Harness v2: System prompt version tracking
-const PROMPT_LAST_MODIFIED = '2026-08-29';
 
 const os = require('os');
 const path = require('path');
-const crypto = require('crypto');
 const { buildToolGuidancePrompt, detectModelFamily } = require('./model-tool-guidance');
 
 // 便携存储适配：使用基于 __dirname 的 BASE_DIR 替代 process.cwd()
@@ -912,7 +910,7 @@ function _buildContextLayer(config, options = {}) {
 }
 
 function _buildVolatileLayer(config, options = {}) {
- const { skillsPrompt = '', memoryPrompt = '', runtimeInfo = {}, sessionMode, environmentIssues } = options;
+ const { skillsPrompt = '', runtimeInfo = {}, sessionMode, environmentIssues } = options;
  const lines = [];
 
  // 会话模式注入（参考 Antigravity PLANNING/EXECUTION/VERIFICATION）
@@ -1384,13 +1382,7 @@ function _hashContent(content) {
 
 function buildSystemPrompt(config, options = {}) {
  const {
- toolNames = [],
- toolSummaries = {},
  skillsPrompt = '',
- memoryPrompt = '',
- runtimeInfo = {},
- sessionMode,
- environmentIssues,
  systemEnvironmentText, // 来自 system-environment.formatForPrompt()
  selfAwarenessText, // 来自 self-awareness.formatForPrompt()
  } = options;

@@ -26,10 +26,13 @@ function buildSourcesReport(sources) {
 
 function defaultBusinessDbPath() {
   try {
-    // 与 business-card-tools.js 同源：业务库真身 = data/business/business.db
-    const path = require('path');
-    const { DATA_DIR } = require('../../core/config');
-    return path.join(DATA_DIR, 'business', 'business.db');
+    // 2026-09-30 深度检查修复: 此处此前自己拼 `DATA_DIR/business/business.db`, 与
+    // business-data-registry 的 BUSINESS_DIR 是**两个独立本源**。实测二者已分裂:
+    // 业务库真身在 data/business/(唯一一份), 而 DATA_DIR 已含 .crabpaw →
+    // 本函数算出 data/.crabpaw/business/business.db(不存在) → safeQuery 对不存在
+    // 路径静默返回 null → 端点报 ok:true/count:0。改为复用注册表单源 BUSINESS_DIR。
+    const { BUSINESS_DIR } = require('../../core/business-data-registry');
+    return require('path').join(BUSINESS_DIR, 'business.db');
   } catch (e) {
     return null;
   }

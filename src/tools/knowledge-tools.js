@@ -13,17 +13,17 @@
  *   - 溯源（provenance）：每条结果携带来源文档/文件路径，防幻觉引用
  */
 const { registry } = require('./registry');
+// 2026-10-09 分层加载协议（OpenViking L0/L1/L2 精华）: 检索结果默认 abstract 层，
+// 带可下钻 ref，模型需要全文时经 ContextDrillDown 升级深度。
+const { DEPTHS, normalizeDepth, renderAtDepth } = require('../core/memory/context-depths');
 
 const KB_NAMESPACE = 'global';
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 10;
+// full 层单条上限：防止单条超长文档把整次检索结果灌爆上下文
+const FULL_DEPTH_MAX_CHARS = 8000;
 
-/** 摘要：截取内容片段（≈200 字符），保留首段语义 */
-function _snippet(content, maxLen = 200) {
-  if (!content) return '';
-  const text = String(content).replace(/\s+/g, ' ').trim();
-  return text.length <= maxLen ? text : text.slice(0, maxLen) + '…';
-}
+// （2026-10-09 原 _snippet 由 context-depths.renderAtDepth 取代——分层加载协议）
 
 /** 归一化检索请求：剥离寒暄/命令前缀，避免把整句丢进 FTS（DeepTutor 查询改写精华的轻量版） */
 function _normalizeQuery(query) {
@@ -56,16 +56,18 @@ registry.register({
       query: { type: 'string', description: '检索内容，如「合同金额」「项目风险」「某组织名称」' },
       limit: { type: 'number', description: `返回结果数（默认 ${DEFAULT_LIMIT}，最大 ${MAX_LIMIT}）` },
       namespace: { type: 'string', description: '命名空间（默认 global）' },
+      depth: { type: 'string', description: '结果深度: abstract(默认,约120字摘要)/overview(约600字要点)/full(全文,单条上限8000字)' },
     },
     required: ['query'],
   },
-  async handler(params, context) {
+  async handler(params, _context) {
     const query = _normalizeQuery(params.query);
     if (!query) {
       return { success: false, error: '检索词不能为空' };
     }
     const limit = Math.min(Math.max(parseInt(params.limit, 10) || DEFAULT_LIMIT, 1), MAX_LIMIT);
     const namespace = params.namespace || KB_NAMESPACE;
+    const depth = normalizeDepth(params.depth);
 
     let engine = null;
     try {
@@ -113,11 +115,23 @@ registry.register({
         sourcePath = meta.sourcePath || doc.source_path || '';
         sourceLabel = meta.source || '';
       } catch { /* metadata 非 JSON 时静默忽略 */ }
+      // 分层渲染：默认 abstract；snippet 字段保留（兼容既有消费方/测试）
+      const rendered = renderAtDepth(r.content, depth, {
+        maxChars: depth === DEPTHS.FULL ? FULL_DEPTH_MAX_CHARS : undefined,
+      });
+      // ref 按资产类型分流：记忆树节点 → tree（下钻展开子级），其余 → kb
+      const isTreeNode = r.type === 'tree_node';
       return {
         id: r.id,
         kind: r.type || 'chunk',
         title: r.title || (doc && doc.title) || '',
-        snippet: _snippet(r.content),
+        snippet: rendered.content,
+        depth: rendered.depth,
+        truncated: rendered.truncated,
+        originalChars: rendered.originalChars,
+        ref: isTreeNode
+          ? { source: 'tree', id: r.id, treeId: r.treeId || null }
+          : { source: 'kb', id: r.id, documentId: r.documentId || null, namespace },
         score: Math.round((r.combinedScore || 0) * 1000) / 1000,
         documentId: r.documentId || null,
         source: sourceLabel,
@@ -156,7 +170,21 @@ registry.register({
       };
     }
 
-    return { success: true, query, total: formatted.length, documents: docCount, kbDocs, results: formatted };
+    const truncatedCount = formatted.filter((r) => r.truncated).length;
+    const depthHint = truncatedCount > 0 && depth !== DEPTHS.FULL
+      ? `有 ${truncatedCount} 条结果为 ${depth} 层摘要。需要某条的完整内容时，用 ContextDrillDown 工具传 ref={source:"kb", id:"<该条 id>"}`
+      : null;
+
+    return {
+      success: true,
+      query,
+      total: formatted.length,
+      documents: docCount,
+      kbDocs,
+      depth,
+      depthHint,
+      results: formatted,
+    };
   },
 });
 

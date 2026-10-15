@@ -84,7 +84,16 @@ async function registerArtifact({ path: p, name, size, format, url, taskId, runI
           const vDir = path.join(VERSIONS_DIR, exist.id);
           fs.mkdirSync(vDir, { recursive: true });
           const archived = path.join(vDir, `v${exist.version}${path.extname(exist.path) || ''}`);
-          fs.renameSync(exist.path, archived);
+          try {
+            fs.renameSync(exist.path, archived);
+          } catch (renameErr) {
+            // 2026-10-15: 跨盘场景 EXDEV——eval 临时目录与仓库常在不同盘符，
+            // rename 不支持跨设备。降级为 copy（旧文件留在原地，无害），
+            // 删除尽力而为（部分沙箱环境对 unlink 有限制，失败不影响归档）。
+            if (renameErr.code !== 'EXDEV') throw renameErr;
+            fs.copyFileSync(exist.path, archived);
+            try { fs.unlinkSync(exist.path); } catch (_) { /* 原文件保留，无害 */ }
+          }
           exist.versions[exist.versions.length - 1].path = archived;
         } catch (e) {
           console.warn('[doc-artifacts] 旧版本归档失败(保留元数据):', e.message);

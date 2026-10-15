@@ -18,6 +18,21 @@ const { AgentEventLedger, EVENT_TYPES } = require('./agent/agent-event-ledger');
 
 const subagents = new Map();
 
+/**
+ * 工具注册表句柄（依赖反转，层契约 R1：core 不得 require 上层 src/tools）。
+ * 由 tools 层启动时注入（src/tools/subagent-tools.js 调 setToolRegistry）；
+ * 未注入时子代理的工具执行诚实报错而非抛异常。
+ * 2026-09-30 深度检查修复：此前 `_getDefaultToolExecutor` 用错误路径
+ * require('./tool-system')（该模块不存在），异常被吞后**任何工具都返回"不可用"**。
+ */
+let _toolRegistry = null;
+function setToolRegistry(reg) {
+  _toolRegistry = reg || null;
+}
+function getToolRegistry() {
+  return _toolRegistry;
+}
+
 const MAX_DEPTH = 3;
 const MAX_CONCURRENT = 5;
 
@@ -561,19 +576,49 @@ class SubAgent {
   }
 
   /**
-   * 获取默认工具执行器   */
+   * 获取默认工具执行器
+   *
+   * 2026-09-30 深度检查修复(核心缺陷): 此处原为 `require('./tool-system')` —— 该模块
+   * **不存在**, require 抛错被下方 catch 吞掉, 于是本执行器对**任何**工具都返回
+   * `{error: "工具 X 不可用"}`。而它是默认路径(execute() 里 `options.toolExecutor ||
+   * this._getDefaultToolExecutor()`, 且 tiered-subagent-runner.js:389 调 execute()
+   * 不传 toolExecutor) → 所有走三级 runner / 专家协作 / 圆桌的子代理**一个工具都调不动**,
+   * 只会空转到 maxIterations 失败。
+   *
+   * 两处错误一并修正:
+   *   1. 模块路径 → 注册表句柄改为**由 tools 层注入**（层契约 R1: core 禁止 require 上层
+   *      src/tools；同 self-awareness.js 的依赖反转做法）。注入点见
+   *      src/tools/subagent-tools.js 启动时的 setToolRegistry(registry)；
+   *   2. 调用面 → registry 条目字段是 `handler` 不是 `execute`(registry.js:251), 且应走
+   *      `registry.execute()` 以复用 checkFn/安全钩子/超时/结果缓存/审计全链
+   *      (直调 handler 会绕过 tool-contract 前置钩子)。返回 `{success, data|error}`,
+   *      与 registry 口径一致。
+   */
   _getDefaultToolExecutor() {
     return async (toolName, args) => {
+      let parsedArgs;
       try {
-        const toolSystem = require('./tool-system');
-        const tool = toolSystem.get(toolName);
-        if (tool && tool.execute) {
-          const parsedArgs = typeof args === 'string' ? JSON.parse(args) : (args || {});
-          return await tool.execute(parsedArgs);
+        parsedArgs = typeof args === 'string' ? JSON.parse(args || '{}') : (args || {});
+      } catch (e) {
+        return { success: false, error: `工具 ${toolName} 参数不是合法 JSON: ${e.message}` };
+      }
+      try {
+        const registry = getToolRegistry();
+        if (!registry || typeof registry.execute !== 'function') {
+          return { success: false, error: `工具 ${toolName} 不可用: 工具注册表未注入(启动早期属正常)` };
         }
-      } catch { console.warn('[subagent-enhanced] silent catch, error swallowed'); }
-
-      return { error: `工具 ${toolName} 不可用` };
+        if (typeof registry.has === 'function' && !registry.has(toolName)) {
+          return { success: false, error: `工具 ${toolName} 不可用: 未注册` };
+        }
+        return await registry.execute(toolName, parsedArgs, {
+          source: 'subagent',
+          agentId: this.id,
+          parentAgentId: this.parentAgentId,
+        });
+      } catch (e) {
+        console.warn(`[subagent-enhanced] 工具 ${toolName} 执行失败:`, e && e.message);
+        return { success: false, error: `工具 ${toolName} 执行失败: ${e && e.message}` };
+      }
     };
   }
 
@@ -1161,6 +1206,8 @@ module.exports = {
   SUBAGENT_TYPES,
   SUBAGENT_PROMPTS,
   SUBAGENT_TOOL_SETS,
+  setToolRegistry,
+  getToolRegistry,
   SubAgentConfig,
   SubAgent,
   SubAgentCoordinator,

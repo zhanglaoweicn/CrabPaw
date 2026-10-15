@@ -1,0 +1,152 @@
+/**
+ * BusinessScene3D 样式（2026-09-30，P2）
+ *
+ * 设计要点：
+ *   · 画布与二维回退**占据同一块空间**（互斥显示），切换时布局不跳
+ *   · 图例是必须的：三维图没有图例就是装饰（纵深/体积/发光各代表什么要说清）
+ *   · 二维回退沿用 HUD 的等宽数字与琥珀告警色语言
+ *   · 不做毛玻璃：WebGL 画布叠 backdrop-filter 在低端 GPU 上极易掉帧
+ */
+.bs3d {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  min-width: 320px;
+}
+
+.bs3d__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bs3d__title {
+  color: var(--text-primary, #fafafa);
+  font-size: 13px;
+  font-weight: 600;
+}
+.bs3d__summary {
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 11px;
+}
+
+/* ── 三维画布 ── */
+.bs3d__canvas {
+  width: 100%;
+  height: 260px;
+  border-radius: 8px;
+  background: radial-gradient(ellipse at 50% 35%, rgba(34, 211, 238, 0.07), transparent 65%);
+  cursor: grab;
+  touch-action: none;   /* 触屏上拖动即旋转，不触发页面滚动 */
+}
+.bs3d__canvas:active {
+  cursor: grabbing;
+}
+
+/* ── 空态 ── */
+.bs3d__empty {
+  padding: 22px 0;
+  text-align: center;
+  color: var(--text-muted, #71717a);
+  font-size: 12px;
+}
+
+/* ── 二维回退（L0 或渲染失败；信息与三维同源）── */
+.bs3d__flat {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 0;
+}
+.bs3d__warn {
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.08);
+  color: #fbbf24;
+  font-size: 10.5px;
+  line-height: 1.5;
+  margin-bottom: 2px;
+}
+.bs3d__row {
+  display: grid;
+  grid-template-columns: 96px 1fr 52px 36px;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.bs3d__row-label {
+  color: var(--text-secondary, #a1a1aa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs3d__row-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.bs3d__row-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.5), #22d3ee);
+}
+.bs3d__row.is-alarm .bs3d__row-fill {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.55), #f59e0b);
+}
+.bs3d__row-val {
+  color: var(--text-primary, #fafafa);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  text-align: right;
+}
+.bs3d__row-share {
+  color: var(--text-muted, #71717a);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ── 图例：三维图没有图例就是装饰 ── */
+.bs3d__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text-muted, #71717a);
+  font-size: 10px;
+}
+
+.bs3d__alarm {
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.08);
+  color: #fbbf24;
+  font-size: 11px;
+}
+
+.bs3d__actions {
+  display: flex;
+  gap: 6px;
+}
+.bs3d__btn {
+  flex: 1;
+  padding: 5px;
+  border-radius: 6px;
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.1));
+  background: transparent;
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color var(--transition-fast, 150ms) ease, border-color var(--transition-fast, 150ms) ease;
+}
+.bs3d__btn:hover {
+  color: var(--text-primary, #fafafa);
+  border-color: var(--glass-border, rgba(255, 255, 255, 0.18));
+}
+
+/* 动效阶梯：L0 下连 CSS 过渡也去掉（本组件在 L0 已不挂 WebGL，
+   这里兜住二维回退的过渡，保持一致） */
+[data-motion='L0'] .bs3d__btn {
+  transition: none;
+}

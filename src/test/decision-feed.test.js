@@ -48,7 +48,7 @@ describe('decision-feed 接线', () => {
   });
 
   test('installDecisionFeed 挂 global.__decisionFeed 并可复取', () => {
-    const inst = installDecisionFeed({ store });
+    installDecisionFeed({ store });
     expect(typeof global.__decisionFeed).toBe('function');
     global.__decisionFeed('run:start', { roundId: 'r5' });
     global.__decisionFeed('run:finished', { roundId: 'r5', ts: 1 });

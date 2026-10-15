@@ -3002,7 +3002,7 @@ async function analyzeStockFull(stockCode, opts = {}) {
       _analysisExtrasPending = {
         code: out.quote.code || out.code,
         // news 契约不含 content（前端不消费），剥掉避免 payload 膨胀
-        news: newsItems ? newsItems.map(({ content, ...rest }) => rest) : null,
+        news: newsItems ? newsItems.map(({ content: _content, ...rest }) => rest) : null,
         events,
         fundamentalsSummary,
       };

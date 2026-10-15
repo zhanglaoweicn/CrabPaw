@@ -14,7 +14,8 @@
 const { memoryManager } = require('./memory-system');
 // 2026-09-18 会话膨胀治理层1: 长内容入库前落档——历史只存预览+存档引用
 const { compactMessageContent } = require('./history-compactor');
-const { getUnifiedStore } = require('./memory/unified-store');
+// 2026-10-09: 顶层 getUnifiedStore 导入已无用（session:end 收口改造后归档统一走
+// session-commit 管线，其余使用点均为函数内局部 require），移除以免 lint 告警
 const { HybridSearchEngine } = require('./hybrid-search');
 
 let _hybridSearchEngine = null;
@@ -442,34 +443,18 @@ function initReconciliation(force) {
     });
 
     bus.subscribe('session:end', async (event) => {
-        try {
+      try {
         const sessionId = event?.payload?.sessionId;
         if (!sessionId) return;
-        const session = memoryManager.getSession(sessionId);
-        if (!session || session.messages.length === 0) return;
-        // 1. Flush salient facts before the session context is lost
-        await memoryManager.flushMemories(sessionId);
-        // 2. Record session messages as documents for vector search
-        const store = getUnifiedStore();
-        for (const msg of session.messages.slice(-30)) {
-        try {
-        store.upsertChunk({
-        document_id: `session_${sessionId}_msg_${msg.timestamp || Date.now()}`,
-        namespace: sessionId,
-        content: msg.content || '',
-        chunk_index: 0,
-        metadata: { role: msg.role, sessionId },
+        // 2026-10-09 会话收口改造: 原内联重活(flushMemories+30条消息向量入块+Dream计数)
+        // 因 payload 缺 sessionId 从未触发;现收敛到 session-commit 管线——
+        // request_end/stop_hook 走 90s 静默防抖, session_closed 立即提交, 幂等去重在管线内。
+        const { scheduleSessionCommit } = require('./memory/session-commit');
+        scheduleSessionCommit(sessionId, {
+          trigger: event?.payload?.trigger || 'request_end',
         });
-        } catch (e) {
-          /* per-message insert failure non-fatal */
-          console.warn('[unified-memory.js] 空 catch 补日志:', e && e.message);
-        }
-        }
-        // 3. Increment AutoDream session count
-        memoryManager.autoDream.incrementSessionCount();
-        console.log(`[unified-memory] session reconciled: ${sessionId}`);
       } catch (e) {
-        console.debug('[unified-memory] reconciliation failed:', e.message);
+        console.warn('[unified-memory] 会话收口调度失败:', e.message);
       }
     });
   } catch (e) {

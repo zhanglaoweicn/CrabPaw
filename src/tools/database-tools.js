@@ -11,6 +11,7 @@ const path = require('path');
 const { registry } = require('./registry');
 const { getDataDir } = require('../core/config');
 const { BUSINESS_DIR } = require('../core/business-data-registry');
+const dbConnections = require('../core/db-connections');
 
 // 业务库默认路径（2026-09-06): DatabaseQuery 未传 database 时 sqlite 默认指向此处
 const BUSINESS_DB_PATH = require('path').join(BUSINESS_DIR, 'business.db');
@@ -68,6 +69,9 @@ async function buildSchemaInfoForDb(params, context) {
 }
 
 async function handleListTables(params, context) {
+  const _r = _checkAndResolveConnection(params);
+  if (_r.error) return { success: false, error: _r.error };
+  params = _r.params;
   const { type = 'sqlite', database, host, port, user, password } = params;
   try {
     if (type === 'sqlite') {
@@ -93,7 +97,10 @@ async function handleListTables(params, context) {
 }
 
 async function handleDescribeTable(params, context) {
-  const { type = 'sqlite', database, table, host, port, user, password } = params;
+  const _r = _checkAndResolveConnection(params);
+  if (_r.error) return { success: false, error: _r.error };
+  params = _r.params;
+  const { type = 'sqlite', database, table } = params;
   if (!table || typeof table !== 'string') return { success: false, error: '缺少 table 参数' };
   if (table.includes(';') || /^sqlite_/i.test(table)) return { success: false, error: '非法表名' };
   try {
@@ -108,6 +115,72 @@ async function handleDescribeTable(params, context) {
   } catch (e) {
     console.error('[database-tools] handleDescribeTable 失败:', e.message || e);
     return { success: false, error: `表结构查询失败: ${e.message}` };
+  }
+}
+
+/**
+ * DatabaseConfig — 命名数据源管理（2026-10-08）
+ * save/list/remove/set-default/test。配置一次后，DatabaseQuery/ListTables
+ * 未传连接参数时自动回退（见 _checkAndResolveConnection），无需每次重复提供。
+ */
+async function handleDatabaseConfig(params) {
+  const { action, name, type, host, port, database, user, password, setDefault } = params || {};
+  try {
+    switch (action) {
+      case 'save': {
+        if (!password && (type === 'mysql' || type === 'postgresql')) {
+          return { success: false, error: 'save 需要 password（MySQL/PostgreSQL）' };
+        }
+        const r = dbConnections.saveConnection({ name, type, host, port, database, user, password, setDefault });
+        if (!r.ok) return { success: false, error: r.error };
+        return {
+          success: true,
+          saved: r.record,
+          note: r.record.isDefault
+            ? '已设为默认数据源。此后 DatabaseQuery/ListTables 不传连接参数时自动使用它。'
+            : `已保存。查询时传 connection="${r.record.name}" 使用；默认数据源为 ${dbConnections.getDefaultName()}。`,
+        };
+      }
+      case 'list': {
+        const list = dbConnections.listConnections();
+        return { success: true, default: dbConnections.getDefaultName(), count: list.length, connections: list };
+      }
+      case 'remove': {
+        if (!name) return { success: false, error: 'remove 需要 name' };
+        const r = dbConnections.removeConnection(name);
+        return r.ok ? { success: true, removed: name, newDefault: r.default } : { success: false, error: r.error };
+      }
+      case 'set-default': {
+        if (!name) return { success: false, error: 'set-default 需要 name' };
+        const r = dbConnections.setDefaultConnection(name);
+        return r.ok ? { success: true, default: r.default } : { success: false, error: r.error };
+      }
+      case 'test': {
+        const raw = { ...(name ? { connection: name } : {}), type, host, port, database, user, password };
+        const _r = _checkAndResolveConnection(raw);
+        if (_r.error) return { success: false, error: _r.error };
+        const merged = _r.params;
+        const t = merged.type || 'sqlite';
+        if (t === 'mysql') {
+          await _queryMySQL({ host: merged.host, port: merged.port, user: merged.user, password: merged.password, database: merged.database }, 'SELECT 1 AS ok');
+        } else if (t === 'postgresql') {
+          await _queryPostgres({ host: merged.host, port: merged.port, user: merged.user, password: merged.password, database: merged.database }, 'SELECT 1 AS ok');
+        } else {
+          if (!merged.database) return { success: false, error: 'SQLite 需要 database（文件路径）' };
+          await _querySQLite(merged.database, 'SELECT 1 AS ok');
+        }
+        return {
+          success: true,
+          connection: name || '(参数直传)',
+          type: t, host: merged.host, port: merged.port, database: merged.database, user: merged.user,
+          note: '连接成功',
+        };
+      }
+      default:
+        return { success: false, error: `未知 action: ${action}。支持: save / list / remove / set-default / test` };
+    }
+  } catch (e) {
+    return { success: false, error: `DatabaseConfig ${action} 失败: ${e.message || e}` };
   }
 }
 
@@ -266,7 +339,26 @@ async function _queryPostgres(connStr, query) {
   }
 }
 
+/**
+ * 命名数据源回退（2026-10-08）——params.connection 指定已保存数据源，
+ * 未传的连接字段回退默认数据源（DatabaseConfig save 的产物）。
+ * 未传 connection 且无默认数据源时零侵入，行为与此前一致。
+ */
+function _checkAndResolveConnection(params) {
+  if (params && params.connection) {
+    const info = dbConnections.getConnectionInfo(params.connection);
+    if (!info) {
+      return { error: `未找到名为 "${params.connection}" 的已保存数据源。用 DatabaseConfig(action=list) 查看已保存清单，或直接传完整 host/user/password。` };
+    }
+  }
+  return { params: dbConnections.resolveConnectionParams(params) };
+}
+
 async function handleDatabaseQuery(params, context) {
+  const _r = _checkAndResolveConnection(params);
+  if (_r.error) return { success: false, error: _r.error };
+  params = _r.params;
+
   let { type = 'sqlite', database, query, host, port, user, password } = params;
 
   type = params.type || 'sqlite';
@@ -375,11 +467,12 @@ registry.register({
   schema: {
     type: 'object',
     properties: {
-      type: { type: 'string', enum: ['sqlite', 'mysql', 'postgresql'], description: '数据库类型', default: 'sqlite' },
+      type: { type: 'string', enum: ['sqlite', 'mysql', 'postgresql'], description: '数据库类型（未传时回退已保存数据源）', default: 'sqlite' },
+      connection: { type: 'string', description: '已保存数据源名（DatabaseConfig save 过）。未传时回退默认数据源' },
       database: { type: 'string', description: '数据库名（SQLite：文件路径；MySQL/PostgreSQL：数据库名）' },
       query: { type: 'string', description: 'SQL 查询语句。只允许 SELECT/PRAGMA/EXPLAIN/ANALYZE/WITH 查询' },
       question: { type: 'string', description: '自然语言查询（可选，提供后自动走 NL2SQL 翻译）' },
-      host: { type: 'string', description: '数据库主机地址（MySQL/PostgreSQL 需要）' },
+      host: { type: 'string', description: '数据库主机地址（MySQL/PostgreSQL 需要，已保存数据源可省）' },
       port: { type: 'number', description: '数据库端口' },
       user: { type: 'string', description: '数据库用户名' },
       password: { type: 'string', description: '数据库密码' },
@@ -395,18 +488,19 @@ registry.register({
   name: 'ListTables',
   toolset: 'data',
   category: 'database',
-  description: '列出数据库全部表名。支持 SQLite/MySQL/PostgreSQL。NL2SQL 前自动调用，也可供用户查询库内有什么数据。',
+  description: '列出数据库全部表名。支持 SQLite/MySQL/PostgreSQL。NL2SQL 前自动调用，也可供用户查询库内有什么数据。已保存数据源（DatabaseConfig save）可只传 connection 或省略连接参数。',
   whenNotToUse: ['需要查询具体数据时（用 DatabaseQuery）', '需要表结构详情时（用 DescribeTable）'],
   riskLevel: 'low',
   schema: {
     type: 'object',
     properties: {
-      type: { type: 'string', enum: ['sqlite', 'mysql', 'postgresql'], description: '数据库类型', default: 'sqlite' },
+      type: { type: 'string', enum: ['sqlite', 'mysql', 'postgresql'], description: '数据库类型（未传时回退已保存数据源）', default: 'sqlite' },
+      connection: { type: 'string', description: '已保存数据源名。未传时回退默认数据源' },
       database: { type: 'string', description: '数据库名（SQLite：文件路径）' },
       host: { type: 'string' }, port: { type: 'number' },
       user: { type: 'string' }, password: { type: 'string' },
     },
-    required: ['type', 'database'],
+    anyOf: [{ required: ['type', 'database'] }, { required: ['connection'] }],
   },
   handler: handleListTables,
   timeout: 30000,
@@ -434,4 +528,31 @@ registry.register({
   isReadOnly: true,
 });
 
-module.exports = { handleDatabaseQuery, handleListTables, handleDescribeTable, buildSchemaInfoForDb, looksLikeNaturalLanguage, _assertReadOnlyQuery };
+registry.register({
+  name: 'DatabaseConfig',
+  toolset: 'data',
+  category: 'database',
+  description: '管理已保存的数据库数据源（命名连接）：save 保存后密码加密落盘，此后 DatabaseQuery/ListTables 不传连接参数时自动回退默认数据源——用户首次给出连接信息时主动调用 save，之后查询无需重复提供。list 查看清单（密码掩码），remove 删除，set-default 切换默认，test 验证连通性。',
+  whenNotToUse: ['执行数据查询（用 DatabaseQuery）', '用户明确表示连接信息只用一次、不需要记住时'],
+  riskLevel: 'medium',
+  schema: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: ['save', 'list', 'remove', 'set-default', 'test'], description: '操作类型' },
+      name: { type: 'string', description: '数据源名（save/remove/set-default/test 用；如 prod、crm-mysql）' },
+      type: { type: 'string', enum: ['sqlite', 'mysql', 'postgresql'], description: '数据库类型（save 必填）' },
+      host: { type: 'string', description: '数据库主机地址（save MySQL/PostgreSQL 必填）' },
+      port: { type: 'number', description: '端口（默认 MySQL 3306 / PostgreSQL 5432）' },
+      database: { type: 'string', description: '数据库名（SQLite 为文件路径）' },
+      user: { type: 'string', description: '数据库用户名' },
+      password: { type: 'string', description: '密码（save 必填；加密落盘，查询结果中只回显掩码）' },
+      setDefault: { type: 'boolean', description: '是否设为默认数据源（首个保存的自动成为默认）' },
+    },
+    required: ['action'],
+  },
+  handler: handleDatabaseConfig,
+  timeout: 30000,
+  isReadOnly: false,
+});
+
+module.exports = { handleDatabaseQuery, handleListTables, handleDescribeTable, handleDatabaseConfig, buildSchemaInfoForDb, looksLikeNaturalLanguage, _assertReadOnlyQuery };

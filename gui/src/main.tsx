@@ -3,7 +3,20 @@ import App from './App'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { Toaster } from 'sonner'
+import { resolveAndApplyMotionTier, applyTier, watchSystemMotionPreference } from './lib/motion-tier'
+import { registerBriefingVoiceCommands } from './lib/briefing-voice'
 import './index.css'
+
+// ── 动效保真阶梯（2026-09-30）──────────────────────────────────────────
+// UI 有 98 处 backdrop-filter / 340 个 keyframes，此前无任何降级机制，
+// 而本产品跑在 U 盘插的老机器上（项目还发生过"大面积 blur 与视频合成层死锁→黑屏"）。
+// 先落保守档保证首帧不闪，再异步按实测帧率决定最终档位。
+// 首帧判定必须同步且极廉价：只读系统无障碍偏好，不做采样。
+try {
+  const reduced = typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  applyTier(reduced ? 'L0' : 'L1')
+} catch { applyTier('L1') }
 
 let errorCount = 0
 const MAX_ERRORS_BEFORE_RELOAD = 50
@@ -123,3 +136,22 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </ThemeProvider>,
 )
+
+// 渲染已挂载后再做帧率采样并落到最终档位（采样窗口约 1.2s，不影响首屏）。
+// 首次启动写 localStorage 供"设置"页展示与手动锁定（手动选择优先于自动判定）。
+void resolveAndApplyMotionTier()
+  .then((tier) => { console.log('[motion] 动效档位:', tier) })
+  .catch((e) => { console.warn('[motion] 档位解析失败，保持保守档:', e?.message || e) })
+// 用户在使用中修改系统"减少动态效果"也要即时生效（手动锁定者除外）
+watchSystemMotionPreference()
+
+// ── 晨报语音指令注册（2026-09-30，P1-2）────────────────────────────────
+// 注册"晨报 / 再说一遍 / 第二条"。命令自带守卫：只有 VoiceShell 把
+// window.__crabpawBriefing 句柄接上之后才会接管这些说法，否则一律放行给模型
+// （/"继续"/"上一句" 是泛说法，未接线时吞掉会破坏正常对话）。
+try {
+  const n = registerBriefingVoiceCommands()
+  console.log(`[briefing-voice] 已注册 ${n} 条晨报语音命令（待 VoiceShell 接线后生效）`)
+} catch (e) {
+  console.warn('[briefing-voice] 命令注册失败（晨报语音不可用，其余功能不受影响）:', (e as Error)?.message || e)
+}

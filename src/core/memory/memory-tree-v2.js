@@ -742,6 +742,33 @@ class MemoryTreeOrchestrator extends EventEmitter {
     return digests;
   }
 
+  /**
+   * 2026-10-09 分层加载协议: 编排器级下钻——此前 drillDown 只在 MemoryTree 实例上,
+   * 编排器无跨树下钻入口,节点 id 无法从工具层解析。
+   * @param {string} treeIdOrKey 树 id（getOrCreateTree 的 key，如 'global:sess_x'）；传空则在全部树中查找
+   * @param {string} nodeId 目标节点 id
+   * @param {object} [opts] { depth?: number }
+   * @returns {Array<{node: TreeNode|object, level: number, treeId: string}>} 未找到返回 []
+   */
+  async drillDown(treeIdOrKey, nodeId, opts = {}) {
+    if (!nodeId) return [];
+    const depth = opts.depth ?? 1;
+    const trees = [];
+    if (treeIdOrKey && this._trees.has(treeIdOrKey)) {
+      trees.push(this._trees.get(treeIdOrKey));
+    } else {
+      for (const [, tree] of this._trees) trees.push(tree);
+    }
+
+    for (const tree of trees) {
+      const hits = await tree.drillDown(nodeId, { depth });
+      if (hits.length > 0) {
+        return hits.map(h => ({ ...h, treeId: tree.id }));
+      }
+    }
+    return [];
+  }
+
   _reconstructTree(data) {
     const tree = new MemoryTree({
       id: data.id,

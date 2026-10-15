@@ -261,14 +261,14 @@ describe('buildFundamentalsSummary（基本面摘要投影）', () => {
   });
 
   test('部分缺失：无 industryProspects → industry 子对象 null', () => {
-    const { industryProspects, ...rest } = fullAnalysis;
+    const { industryProspects: _industryProspects, ...rest } = fullAnalysis;
     const s = buildFundamentalsSummary(rest);
     expect(s.industry).toBeNull();
     expect(s.company).not.toBeNull();
   });
 
   test('无 fundamentals.score 时回退 overallScore.finalScore', () => {
-    const { fundamentals, ...rest } = fullAnalysis;
+    const { fundamentals: _fundamentals, ...rest } = fullAnalysis;
     const s = buildFundamentalsSummary({ ...rest, fundamentals: { metrics: [{ name: 'PB', value: '1.0' }] } });
     expect(s.score).toBe(0.72);
   });

@@ -25,6 +25,7 @@ import { MorningBriefingStrip } from '../../components/MorningBriefingStrip'
 import { useShellVoiceConfig } from './useShellVoiceConfig'
 import type { ChatMsg, ChatMsgFile } from './types'
 import { ChatMessageItem, ChatEmptyState, StreamingBubble, RtTypingIndicator } from './ChatMessages'
+import { ImageGenCard } from './ImageGenCard'
 import { ChatInputArea } from './ChatInputArea'
 import { useRoundtableChat } from './useRoundtableChat'
 import { rtPhaseLabel } from '../../hooks/useRoundtable'
@@ -40,6 +41,11 @@ import { useAgentMonitor } from '../../hooks/useAgentMonitor'
 import { useKwsWakeWord, type KwsAudioLevel } from '../../hooks/useKwsWakeWord'
 import { useVoiceState } from '../../contexts/VoiceStateContext'
 import { useSpeechQueue } from '../../hooks/useSpeechQueue'
+// 2026-10-09 P1-2 晨报端到端接线: 控制器/预热缓存/语音命令句柄
+import { BriefingController, type BriefingPlayer } from '../../lib/briefing-controller'
+import type { BriefingInput } from '../../lib/briefing-script'
+import { TtsPrewarmCache } from '../../lib/tts-prewarm'
+import type { BriefingVoiceHandler } from '../../lib/briefing-voice'
 import { useSceneSurfaces } from '../../lib/scene-client'
 import { stripCommandPrefix } from '../../lib/voice-panel-commands'
 import { deriveAgentFocus, deriveOrbMode, deriveOrbVolume } from '../../lib/voice-orb-state'
@@ -47,12 +53,24 @@ import { interceptLocalVoiceCommand } from '../../lib/voiceCommands'
 import { apiGet } from '../../lib/api'
 import { useDraggable } from '../../lib/useDraggable'
 import { ShellFloatCard } from '../../components/ShellFloatCard'
+import { HudBar } from '../../components/HudBar'
+import { ProvenancePanel } from '../../components/ProvenancePanel'
+import { BusinessScene3D } from '../../components/BusinessScene3D'
 import { sweepCompositorDeferred } from '../../lib/compositor'
 import { playSound } from '../../hooks/useSoundEffects'
 import { HeartbeatCard } from '../../components/HeartbeatCard'
 import { SysInfoCard } from '../../components/SysInfoCard'
 import { fileUrlFor } from '../../lib/attachment'
-import { isCardWallKind, loadDismissedKeys, saveDismissedKeys } from '../../lib/surface-utils'
+import {
+  isCardWallKind,
+  fingerprintOf,
+  loadDismissStore,
+  saveDismissStore,
+  isDismissed,
+  markDismissed,
+  clearDismissed,
+  type DismissStore,
+} from '../../lib/surface-utils'
 import { nextPhaseThreshold, phaseText, sceneFromPhase } from '../../lib/holo-phase'
 import { Minus, Square, X, Columns, RotateCcw, LayoutDashboard, History, Brush, ChevronDown, Presentation, MessageSquare, ListChecks, Activity, AudioLines, Sun, Megaphone, Tv, Loader2 } from 'lucide-react'
 import { isKioskDevice, getKioskOverride, setKioskOverride } from '../../lib/kiosk-mode'
@@ -121,6 +139,24 @@ const AMBIENT_ACCENT: Record<string, 'orange' | 'blue' | 'purple' | 'green' | 'p
 /** 球卡与对话卡之间的预留间隙：实测对话卡比公式宽约 16px（内层留白），
  *  按 16 预留会变成"刚好贴住"，这里留 32 保证看得见空隙（2026-09-23 实测） */
 const ORB_CHAT_GAP = 32
+
+/**
+ * 关闭确认动画时长（毫秒）——卡片播完收拢动画后才从 DOM 摘除。
+ * 口径与 CSS 的 `--motion-enter`（动效阶梯令牌）保持一致：
+ *   L2 380ms / L1 220ms / L0 ~0ms（无障碍或弱机下近乎瞬变）
+ * 这里读一次计算值并留余量，避免用固定值把 L0 用户也拖慢。读取失败回落 300ms。
+ */
+function resolveCloseAnimMs(): number {
+  try {
+    if (typeof window === 'undefined' || typeof getComputedStyle !== 'function') return 300
+    const raw = getComputedStyle(document.documentElement).getPropertyValue('--motion-enter').trim()
+    if (!raw) return 300
+    const n = parseFloat(raw)
+    if (!Number.isFinite(n)) return 300
+    const ms = raw.endsWith('ms') ? n : n * 1000
+    return Math.max(60, Math.min(600, Math.round(ms) + 60))   // +60ms 余量，确保动画已结束
+  } catch { return 300 }
+}
 
 function orbAnchorX(innerWidth: number, cardW: number = ORB_CARD_W): number {
   const chatW = Math.min(innerWidth * 0.3344, CHAT_CARD_MAX_W)
@@ -454,6 +490,72 @@ export function VoiceShell() {
     return () => window.removeEventListener('crabpaw:speak', onSpeak)
   }, [])
 
+  // ── 2026-10-09 P1-2 晨报端到端接线（规格 §4.2 的最后一步）──
+  // 三条语音命令在 main.tsx 启动即注册，guard 只在 __crabpawBriefing 已挂接时接管。
+  // 这里挂上真正的控制器：取数(/api/briefing/today 单源) → 编译 60 秒稿 → 预热音频
+  // → 经 speechQueue 播报——与面板确认播报同一队列同一嗓子，不新增播放通道。
+  const briefingPrewarmRef = useRef<TtsPrewarmCache | null>(null)
+  if (!briefingPrewarmRef.current) {
+    briefingPrewarmRef.current = new TtsPrewarmCache({
+      synthesize: async (text, voice, speed) => {
+        try {
+          // 与 speechQueue 同款双通道：Electron 走主进程代理，绕开渲染进程网络层
+          if (window.electronAPI?.api?.proxy) {
+            const res = await window.electronAPI.api.proxy('POST', '/api/voice/tts', { text, voice, speed })
+            if (!res?.success) return null
+            return res.data?.audioBase64 ? { audioBase64: res.data.audioBase64, audioFormat: res.data.audioFormat } : null
+          }
+          const { resolveApiUrl } = await import('../../lib/api')
+          const url = await resolveApiUrl('/api/voice/tts')
+          const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice, speed }) })
+          if (!r.ok) return null
+          const data = await r.json()
+          return data?.audioBase64 ? { audioBase64: data.audioBase64, audioFormat: data.audioFormat } : null
+        } catch (e) {
+          console.warn('[briefing] 预热合成失败（该段回落实时合成）:', (e as Error)?.message || e)
+          return null
+        }
+      },
+    })
+  }
+  // 音色/语速/播放器走 ref 活读——控制器只建一次，固定值会把过期 currentJob
+  // 钉死（屏音同步会漂移），也会让 Settings 改音色对预热键不生效。
+  const briefingCfgRef = useRef({ voice: shellConfig.defaultVoice, speed: shellConfig.speed })
+  briefingCfgRef.current = { voice: shellConfig.defaultVoice, speed: shellConfig.speed }
+  const briefingPlayerRef = useRef<BriefingPlayer | null>(null)
+  briefingPlayerRef.current = {
+    enqueue: speechQueue.enqueue,
+    currentJob: speechQueue.currentJob,
+    isPlaying: speechQueue.isPlaying,
+    clearByPrefix: speechQueue.clearByPrefix,
+    skipCurrent: speechQueue.skipCurrent,
+  }
+  const briefingRef = useRef<BriefingController | null>(null)
+  if (!briefingRef.current) {
+    briefingRef.current = new BriefingController({
+      loadBriefing: async () => {
+        const { apiGet } = await import('../../lib/api')
+        const res = await apiGet<BriefingInput>('/api/briefing/today')
+        if (!res?.success || !res.data) throw new Error(res?.error || '取数失败')
+        return res.data
+      },
+      prewarm: briefingPrewarmRef.current,
+      get player() { return briefingPlayerRef.current! },
+      voice: () => briefingCfgRef.current.voice,
+      speed: () => briefingCfgRef.current.speed,
+    })
+  }
+  useEffect(() => {
+    const w = window as unknown as { __crabpawBriefing?: BriefingVoiceHandler }
+    w.__crabpawBriefing = {
+      isReady: () => briefingRef.current?.ready ?? false,
+      start: () => briefingRef.current?.start() ?? Promise.resolve(0),
+      replayLast: () => briefingRef.current?.replayLast() ?? false,
+      next: () => briefingRef.current?.next() ?? false,
+    }
+    return () => { delete w.__crabpawBriefing }
+  }, [])
+
   // 切到静音时立即停止当前播报（副作用与状态变化解耦，符合 React 并发语义）
   useEffect(() => {
     if (muted && (flow.ttsPlaying || flow.isSpeaking)) {
@@ -635,31 +737,68 @@ export function VoiceShell() {
   )
   // 2026-08-12 修复: 场景卡本地关闭通道。单界面迁移后 SceneShell 不再挂载,
   // __sceneShell 全局接口(语音关闭依赖)成为死代码 → 场景卡无法语音关闭。
-  // 在此重建: dismissedIds 本地即时隐藏,恢复 setVisible/closeTop 契约。
-  // 键 = id + 数据指纹——智能体重新生成同 id 卡(新文章)时指纹变化 → 旧关闭
-  // 记录不遮蔽新卡片(旧 SceneShell 用 _instanceKey 解决的同类问题)。
-  const dismissKey = useCallback((s: Surface) => `${s.id}@${JSON.stringify(s.data)}`, [])
-  // 2026-08-20 弹卡治理: dismiss 记录持久化到 localStorage。
-  // 此前 sceneEpoch(后端重启/重连全量重推)会清空 dismissedIds → 用户已要求
-  // 清除的卡片全部复活。现改为跨重启保留: 同指纹卡保持关闭,新数据卡(新指纹)
-  // 照常出现。持久化逻辑见 lib/surface-utils(上限 300 条防膨胀)。
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(loadDismissedKeys)
+  // 在此重建: 本地即时隐藏, 恢复 setVisible/closeTop 契约。
+  //
+  // 2026-09-30 关闭状态机 v2（SurfaceId/Revision/Lifecycle 分离）——
+  // 此前只有一个按**内容指纹**生成的键 `id@JSON(data)`，指纹随数据刷新而变，
+  // 于是"用户明确关掉的卡片"下一轮刷新必然复活（天气/股票这类稳定 id 卡片原地
+  // upsert 新数据）→ 老板说"关掉"卡又回来，信任归零（git 历史
+  // `fix(ui): 面板「说关了没关」收口` 即此症状）。
+  // 现在分两种语义记账（见 lib/surface-utils 的 DismissStore）：
+  //   · permanent   —— 用户明确关闭（点击/语音/closeTop），按 SurfaceId 记，
+  //                    **数据刷新不复活**；
+  //   · fingerprint —— 指纹级过期，数据变化即可再现（保留原"新内容不被遮蔽"目的）。
+  // 唯一例外：confront 级内容变化（风险升级）允许重新弹出——漏风险比打扰更贵。
+  const dismissKey = useCallback((s: Surface) => fingerprintOf(s.id, s.data), [])
+  const [dismissStore, setDismissStore] = useState<DismissStore>(loadDismissStore)
   // 变更即落盘——已清除的卡片跨重启/重连保持关闭
-  useEffect(() => { saveDismissedKeys(dismissedIds) }, [dismissedIds])
+  useEffect(() => { saveDismissStore(dismissStore) }, [dismissStore])
   const dismissSurface = useCallback((s: Surface) => {
-    setDismissedIds(prev => {
-      const next = new Set(prev)
-      next.add(dismissKey(s))
-      return next
-    })
+    setDismissStore(prev => markDismissed(prev, s, 'permanent'))
     // 2026-09-17: GPU 幽灵层清扫——场景卡(台风地图 canvas 等)关闭后残留合成层
     // 会"画"回屏幕(实测"关闭卡片后顶部菜单栏消失"三进宫), 与 SideSheet 同款兜底
     sweepCompositorDeferred(600)
-  }, [dismissKey])
+  }, [])
   const visibleSurfaces = useMemo(
-    () => stageSurfaces.filter(s => !dismissedIds.has(dismissKey(s))),
-    [stageSurfaces, dismissedIds, dismissKey],
+    () => stageSurfaces.filter(s => !isDismissed(dismissStore, s)),
+    [stageSurfaces, dismissStore],
   )
+  // ── 可见关闭确认（2026-09-30，P1-1）────────────────────────────────────
+  // 关闭的卡片不在同一帧从 DOM 移除：先标 is-closing 播收拢动画，动画结束再摘。
+  // 这样"说关掉"有一次可被余光捕获的反馈（规格 §3.2 的 300ms 契约）。
+  // closingSurfaces 由 store 派生而非另立 state——避免两份状态漂移；永久关闭的卡
+  // 若因 confront 升级被允许复现，它会自动脱离 closing，也不会被误摘。
+  // stageHiddenIds：动画播完、真正从 DOM 摘除的卡片 id（纯本地渲染态，不进 store）
+  const [stageHiddenIds, setStageHiddenIds] = useState<Set<string>>(() => new Set())
+  const closingSurfaces = useMemo(
+    () => stageSurfaces.filter(s => isDismissed(dismissStore, s)),
+    [stageSurfaces, dismissStore],
+  )
+  const closeTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  useEffect(() => {
+    const timers = closeTimersRef.current
+    const closingIds = new Set(closingSurfaces.map(s => s.id))
+    // 新进入 closing 的：排定摘除（纯本地，不改 store）
+    for (const id of closingIds) {
+      if (timers.has(id)) continue
+      timers.set(id, setTimeout(() => {
+        timers.delete(id)
+        setStageHiddenIds(prev => { const next = new Set(prev); next.add(id); return next })
+      }, resolveCloseAnimMs()))
+    }
+    // 已脱离 closing（例如 confront 升级复现）：取消摘除并恢复渲染
+    for (const [id, t] of [...timers]) {
+      if (closingIds.has(id)) continue
+      clearTimeout(t)
+      timers.delete(id)
+      setStageHiddenIds(prev => {
+        if (!prev.has(id)) return prev
+        const next = new Set(prev); next.delete(id); return next
+      })
+    }
+  }, [closingSurfaces])
+  // 组件卸载时清掉待摘除定时器，避免对已卸载组件 setState
+  useEffect(() => () => { for (const t of closeTimersRef.current.values()) clearTimeout(t); closeTimersRef.current.clear() }, [])
   // 2026-09-22: GPU 幽灵层清扫扩面——此前只挂 dismissSurface(手动关卡)与 SideSheet
   // 关闭, 用户实测"ShowWeather 工具后底部输入区/顶部卡被暗层盖住"仍复现: 场景卡由
   // 后端 scene/remove 或 surface 替换离场时不走 dismiss, 残留合成层无清扫。改为
@@ -681,6 +820,14 @@ export function VoiceShell() {
   // reminder/proactive 的文本卡此前以裸文本形式出现在 holo-stage 卡片墙,
   // 属"临时文本卡片"。过滤后提醒消息仍走对话流(AI 消息),不再以卡片出现。
   // 注意: 过滤在渲染层,不影响 dismiss/closeTop 契约。判定见 lib/surface-utils。
+  //
+  // 2026-09-30: 正在播关闭动画的卡（单独一列，不进收纳/展开逻辑）。
+  // 与 cardWallSurfaces 相加即"墙上应渲染的全部卡"：关掉最后一张时容器因此不会
+  // 先行卸载（原 `cardWallSurfaces.length > 0` 会让离场动画永远跑不到）。
+  const closingWallSurfaces = useMemo(
+    () => closingSurfaces.filter(s => isCardWallKind(s.kind) && !stageHiddenIds.has(s.id)),
+    [closingSurfaces, stageHiddenIds],
+  )
   const cardWallSurfaces = useMemo(
     () => visibleSurfaces.filter(s => isCardWallKind(s.kind)),
     [visibleSurfaces],
@@ -752,12 +899,13 @@ export function VoiceShell() {
     const api = {
       setVisible: (kind: string, visible: boolean): boolean => {
         const hasKind = stageSurfaces.some(s => s.kind === kind)
-        setDismissedIds(prev => {
-          const next = new Set(prev)
+        setDismissStore(prev => {
+          let next = prev
           for (const s of stageSurfaces) {
             if (s.kind !== kind) continue
-            if (visible) next.delete(dismissKey(s))
-            else next.add(dismissKey(s))
+            // visible=true（语音"打开X"）→ 撤销关闭（两种账都要撤）；
+            // visible=false（语音"关闭X"）→ 记为用户明确关闭（跨数据刷新保持）
+            next = visible ? clearDismissed(next, s.id) : markDismissed(next, s, 'permanent')
           }
           return next
         })
@@ -919,6 +1067,35 @@ export function VoiceShell() {
   }, [])
   // Task 13: 会话历史抽屉
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false)
+  // 2026-09-30 P1-3: HUD 单数字常驻条开关。默认开（它就是为"瞄一眼"存在的），
+  // 用户点 × 关闭后持久化——不打扰是老板的底线，常驻元素必须能永久关掉。
+  const [hudEnabled, setHudEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem('crabpaw_hud_bar') !== 'off' } catch { return true }
+  })
+  // 2026-09-30 P2: 数据出处面板开关 + 当前溯源指标（与 HUD 同源，避免两处口径漂移）
+  const [provenanceOpen, setProvenanceOpen] = useState(false)
+  const [hudProvenanceMetric] = useState<'revenue' | 'receivable' | 'contract'>('receivable')
+  // 账龄三维视图（与出处链共用一个浮卡位置）
+  const [scene3DOpen, setScene3DOpen] = useState(false)
+  const [agingItems, setAgingItems] = useState<Array<{ customer: string; amount: number; overdueDays: number | null }>>([])
+  // 打开三维视图时按需取账龄数据（不常驻轮询：这是"主动要看"才拉的东西）
+  useEffect(() => {
+    if (!scene3DOpen) return
+    let alive = true
+    void (async () => {
+      try {
+        const { apiGet } = await import('../../lib/api')
+        const res = await apiGet<any>('/api/briefing/today')
+        if (!alive || !res?.success) return
+        const items = res.data?.receivables?.items
+        setAgingItems(Array.isArray(items) ? items : [])
+      } catch (e) {
+        console.warn('[scene3d] 账龄数据取数失败（视图将显示空态）:', (e as Error)?.message || e)
+        if (alive) setAgingItems([])
+      }
+    })()
+    return () => { alive = false }
+  }, [scene3DOpen])
   // A2(2026-09-05): 管理舱/历史抽屉并入 sheet-state 互斥——与 11 个 SideSheet 面板
   // 同一互斥位, 打开任一方自动关闭另一方(activateOverlay/activateSheet 内部互斥),
   // 替代原先散落在命令处理器/按钮 onClick 里的 if(cockpitVisible)/if(historyDrawerOpen)
@@ -1766,7 +1943,7 @@ export function VoiceShell() {
             2026-08-16 实机修复: holo-stage-item 从"非交互 kind → pointerEvents none"
             改为恒 auto——MetricCard 等普通卡片的关闭按钮/链接此前被 pointer-events
             禁用, 卡片"无法关闭"。容器仍为 none(点击穿透对话区), 卡片本身可交互。 */}
-        {cardWallSurfaces.length > 0 && (
+        {cardWallSurfaces.length + closingWallSurfaces.length > 0 && (
           <div
             className="holo-stage"
             style={{ pointerEvents: 'none' }}
@@ -1777,6 +1954,18 @@ export function VoiceShell() {
                 className="holo-stage-item"
                 data-kind={s.kind}
                 style={{ pointerEvents: 'auto' }}
+              >
+                <SceneSurfaceRenderer surface={s} compact />
+              </div>
+            ))}
+            {/* 关闭中的卡：继续占位播收拢动画（约 CLOSE_ANIM_MS），
+                给"说关掉"一个可被余光捕获的确认；播完由定时器摘除。 */}
+            {closingWallSurfaces.map(s => (
+              <div
+                key={s.id}
+                className="holo-stage-item is-closing"
+                data-kind={s.kind}
+                aria-hidden
               >
                 <SceneSurfaceRenderer surface={s} compact />
               </div>
@@ -2001,9 +2190,10 @@ export function VoiceShell() {
               ))}
               <StreamingBubble agentDisplayName={agentDisplayName} text={streamingAiText} />
               <RtTypingIndicator running={roundtable.running} typing={roundtable.typing} />
-              {/* 2026-08-14(DingDong CardStream 对齐): 工具结果卡片流——内嵌聊天流,
-                  四态生命周期(running→done/fail→2.5s 淡出), 与右栏过程卡双轨并存
-                  S4: 会客厅态收起（10px 工具细流是给操作者看的，客人只看上面那行大字）*/}
+              {/* 2026-10-10 生图任务卡: ImageGenerate 专属卡——生成过程(逐槽位状态)
+                  与成图缩略图同卡展示, 不随轮次淡出(产物本体非过程噪音)。
+                  kiosk 会客厅态同样收起(与 ToolCardStream 同口径) */}
+              {!kiosk && <ImageGenCard slots={flow.imageGenSlots} onOpenImage={openAttachmentFile} />}
               {!kiosk && <ToolCardStream runs={flow.toolEvents} />}
             </div>
           )}
@@ -2276,6 +2466,55 @@ export function VoiceShell() {
         onClose={() => setHistoryDrawerOpen(false)}
         onResume={handleHistoryResume}
       />
+
+      {/* 2026-09-30 P1-3 HUD 单数字常驻条（规格 §5）——
+          会议中"瞄一眼"：一个数字 + 一个方向 + 一个风险点 + 新鲜度，点击展开经营简报。
+          刻意做成**应用内常驻条**而非独立窗口/托盘：实测便携版点 X 是真退出
+          （main/index.ts:847 缩托盘仅 isDev 生效），脱离主窗口没有活着的后端可查。
+          诚实降级由 HudBar/lib/hud-metric 保证：取数失败显示 — 而不是 0。
+          用户可关闭（持久化），避免打扰。 */}
+      {hudEnabled && (
+        <div className="hud-dock">
+          <HudBar
+            metric="overdueReceivable"
+            onExpand={() => { void handleUserInput('打开经营简报') }}
+            onShowProvenance={() => setProvenanceOpen(true)}
+          />
+          <button
+            type="button"
+            className="hud-dock__close"
+            title="不再显示（可在设置里重新开启）"
+            aria-label="关闭常驻条"
+            onClick={() => { setHudEnabled(false); try { localStorage.setItem('crabpaw_hud_bar', 'off') } catch { /* 存不下只影响下次启动 */ } }}
+          >×</button>
+        </div>
+      )}
+
+      {/* 2026-09-30 P2 数据出处链 + 经营数据三维化：两者**共用一个浮卡位置**。
+          点 HUD 的"从哪来"打开出处链；面板里可切到"看账龄结构"三维视图。
+          共位而非各开一张卡：浮卡一多就互相遮挡，而这二者本就是同一个问题的
+          "凭证"与"形状"两面。三维部分经 lazy 边界复用已有 three chunk，首屏无新增体积。 */}
+      {provenanceOpen && (
+        <ProvenancePanel
+          metric={hudProvenanceMetric}
+          onClose={() => setProvenanceOpen(false)}
+          onShow3D={() => { setProvenanceOpen(false); setScene3DOpen(true) }}
+        />
+      )}
+      {scene3DOpen && (
+        <ShellFloatCard
+          cardKey="business-scene-3d"
+          title={<span>账龄结构</span>}
+          width={380}
+          blur="sm"
+          defaultOffset={{ x: 64, y: 120 }}
+        >
+          <BusinessScene3D
+            items={agingItems}
+            onClose={() => setScene3DOpen(false)}
+          />
+        </ShellFloatCard>
+      )}
 
     </div>
   )

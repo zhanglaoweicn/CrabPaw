@@ -154,3 +154,102 @@ describe('导入 → 视图合并 → superseded（端到端）', () => {
     }
   });
 });
+
+/**
+ * reconcileColumns —— 注册表列名 vs 真实表结构的对账（2026-09-30 实机故障）
+ *
+ * 真实故障经过：注册表把 contracts 的列记成 `到期日期`，而表里其实是 `到期日`。
+ * SQLite 的 CREATE VIEW **不校验列引用**，于是 v_contract "建成功"、查询时才报
+ * `no such column` → 合同卡长期显示"无到期合同"（错误只落在日志里）。
+ * 对策是建视图前拿真实列名过滤并如实上报差异——本组用例锁住这个过滤。
+ */
+describe('reconcileColumns（建视图前的列名对账）', () => {
+  const { reconcileColumns, rebuildSemanticViews } = require('../core/business/semantic-views');
+
+  test('两端都有的列保留，缺失的列单独报出（不静默丢弃）', () => {
+    const declared = [
+      { name: '客户', canonical: 'customer' },
+      { name: '合同金额', canonical: 'contract' },
+      { name: '到期日期', canonical: 'date' },   // 表里没有：多了一个"期"
+    ];
+    const { kept, missing } = reconcileColumns(declared, ['客户', '合同金额', '到期日']);
+    expect(kept.map((c) => c.name)).toEqual(['客户', '合同金额']);
+    expect(missing).toEqual(['到期日期']);
+  });
+
+  test('完全一致 → 无缺失', () => {
+    const { kept, missing } = reconcileColumns(
+      [{ name: 'a', canonical: 'date' }, { name: 'b', canonical: 'revenue' }], ['a', 'b', 'c'],
+    );
+    expect(kept).toHaveLength(2);
+    expect(missing).toEqual([]);
+  })
+
+  test('声明为空/未定义 → 空结果不抛', () => {
+    expect(reconcileColumns([], ['a']).kept).toEqual([]);
+    expect(reconcileColumns(undefined, ['a']).kept).toEqual([]);
+    expect(reconcileColumns([{ name: 'a' }], []).missing).toEqual(['a']);
+  })
+
+  test('用坏列名建视图会被剔除，视图仍可用（这是修复的核心收益）', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'reconcile-'));
+    const Database = require('better-sqlite3');
+    const dbPath = path.join(tmp, 'b.db');
+    const db = new Database(dbPath);
+    db.exec('CREATE TABLE contracts (客户 TEXT, 合同金额 INTEGER, 到期日 TEXT)');
+    db.prepare('INSERT INTO contracts VALUES (?,?,?)').run('恒信物流', 96000, '2026-10-20');
+    db.close();
+
+    const r = rebuildSemanticViews({
+      dbPath,
+      tables: [{
+        name: 'contracts', role: 'contract', dbPath, superseded: false,
+        columns: [
+          { name: '客户', canonical: 'customer' },
+          { name: '合同金额', canonical: 'contract' },
+          { name: '到期日期', canonical: 'date' },   // 坏列名
+        ],
+      }],
+    });
+    // 视图建出来了，且差异被如实上报
+    expect(r.rebuilt).toContain('v_contract');
+    expect(r.reconciled).toEqual([{ table: 'contracts', view: 'v_contract', missing: ['到期日期'] }]);
+    expect(r.errors.join('')).toContain('到期日期');
+
+    // 关键：视图真的能查（修复前会 no such column）
+    const db2 = new Database(dbPath, { readonly: true });
+    const row = db2.prepare('SELECT "customer", "contract" FROM v_contract').get();
+    db2.close();
+    expect(row.customer).toBe('恒信物流');
+    rmTemp(tmp);
+  })
+
+  test('坏列名不会导致整组放弃（其余列照常进视图）', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'reconcile2-'));
+    const Database = require('better-sqlite3');
+    const dbPath = path.join(tmp, 'b.db');
+    const db = new Database(dbPath);
+    db.exec('CREATE TABLE receivables (客户 TEXT, 应收金额 INTEGER, 日期 TEXT)');
+    db.prepare('INSERT INTO receivables VALUES (?,?,?)').run('华辰机械', 128000, '2026-04-01');
+    db.close();
+
+    const r = rebuildSemanticViews({
+      dbPath,
+      tables: [{
+        name: 'receivables', role: 'receivable', dbPath,
+        columns: [
+          { name: '客户', canonical: 'customer' },
+          { name: '应收金额', canonical: 'receivable' },
+          { name: '日期', canonical: 'date' },
+          { name: '不存在的列', canonical: 'supplier' },   // 坏列名
+        ],
+      }],
+    });
+    expect(r.rebuilt).toContain('v_receivable');
+    const db2 = new Database(dbPath, { readonly: true });
+    const row = db2.prepare('SELECT COUNT(*) AS c FROM v_receivable').get();
+    db2.close();
+    expect(row.c).toBe(1);
+    rmTemp(tmp);
+  })
+});

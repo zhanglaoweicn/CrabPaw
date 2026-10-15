@@ -399,13 +399,22 @@ class HarnessLifecycleManager extends EventEmitter {
       });
     }
 
+    // 2026-10-09 会话收口修复: payload 补 sessionId/userId——unified-memory 的
+    // session:end 巩固订阅以 payload.sessionId 为守卫,缺参即整体空转(会话结束
+    // 的事实抢救/向量入块/Dream 计数从不触发,沉淀只靠压缩时兜底)。
     this.emit('session:end', {
+      sessionId: sessionStats.sessionId || null,
+      userId: sessionStats.userId || null,
+      trigger: 'request_end',
       duration,
       toolCalls: this._totalToolCalls,
       llmCalls: this._totalLlmCalls,
       errors: this._totalErrors,
     });
     getEventBus().publish('session', 'end', {
+      sessionId: sessionStats.sessionId || null,
+      userId: sessionStats.userId || null,
+      trigger: 'request_end',
       duration,
       toolCalls: this._totalToolCalls,
       llmCalls: this._totalLlmCalls,

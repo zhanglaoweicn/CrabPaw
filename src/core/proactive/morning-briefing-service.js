@@ -6,7 +6,6 @@
  */
 
 const fs = require('fs');
-const path = require('path');
 const { listTables } = require('../business-data-registry');
 // 本地日键——与 usage-stats P0-1 修复同口径（旧 toISOString UTC 键 0-8 点错日）
 const { localDayKey } = require('../usage-stats');
@@ -41,8 +40,15 @@ function getSQLiteTableNames(dbPath) {
   return rows ? rows.map((r) => r.name) : [];
 }
 
-/** 统计逾期应收（date < 阈值）与临期合同（date 在 [today, today+7]） */
-function scanBusinessRisks(dbPath, { today, overdueDays = 30 }) {
+/**
+ * 统计逾期应收（date < 阈值）与临期合同（date 在 [today, today+7]）
+ * 2026-09-30 深度检查修复: `today` 此前无默认值——传 undefined 时 `new Date(undefined)
+ * .toISOString()` 抛 RangeError, 被本函数 try/catch 吞掉后返回全 0 的风险计数,
+ * 调用方(risk-alert-service)据此认为"无风险"而静默不发提醒。改为与
+ * buildBriefingSnapshot 同款 localDayKey() 兜底(本地日键, 非 UTC)。
+ */
+function scanBusinessRisks(dbPath, { today, overdueDays = 30 } = {}) {
+  const day = today || localDayKey();
   const result = { receivableOverdue: 0, contractsExpiring: 0, totalReceivable: null };
   try {
     const tables = listTables().filter((t) => !dbPath || t.dbPath === dbPath);
@@ -56,7 +62,7 @@ function scanBusinessRisks(dbPath, { today, overdueDays = 30 }) {
       // 解析实际表名：优先用注册名（若在 SQLite 中存在），否则取第一个实际表名
       const tableName = sqliteTableNames.includes(t.name) ? t.name : (sqliteTableNames[0] || t.name);
       if (t.role === 'receivable') {
-        const overdueDate = new Date(today);
+        const overdueDate = new Date(day);
         overdueDate.setDate(overdueDate.getDate() - overdueDays);
         const overdueDateStr = overdueDate.toISOString().slice(0, 10);
         const rows = safeQuery(dbPath,
@@ -74,12 +80,12 @@ function scanBusinessRisks(dbPath, { today, overdueDays = 30 }) {
           if (top && top.length) result.topOverdueCustomers = top.map((r) => ({ customer: r.c, amount: r.s }));
         }
       } else if (t.role === 'contract') {
-        const end = new Date(today);
+        const end = new Date(day);
         end.setDate(end.getDate() + 7);
         const endStr = end.toISOString().slice(0, 10);
         const rows = safeQuery(dbPath,
           `SELECT COUNT(*) AS c FROM "${tableName.replace(/"/g, '""')}" WHERE date("${dateCol.replace(/"/g, '""')}") BETWEEN date(?) AND date(?)`,
-          [today, endStr]);
+          [day, endStr]);
         if (rows && rows[0]) result.contractsExpiring += Number(rows[0].c || 0);
       }
     }
@@ -102,19 +108,25 @@ function viewExists(dbPath, name) {
  * @returns {Array<{customer: string, amount: number, dueDate: string|null, overdueDays: number|null}>}
  */
 function listOverdueReceivables(dbPath, { today, overdueDays = 30, limit = 20 } = {}) {
+  // 2026-09-30 深度检查修复: today 此前无默认值。briefing-handler.js:66 调用时**不传**
+  // today → 视图查询 date(undefined) 抛错(被 safeQuery 吞成 null) → 逐表回退里
+  // `new Date(undefined).toISOString()` 再抛 RangeError → 整体返回 [], 而端点仍报
+  // ok:true/count:0 → 界面显示"当前无逾期应收"(实测本机有 5 笔共 35.4 万元)。
+  // 与 buildBriefingSnapshot 同款 localDayKey() 兜底。
+  const day = today || localDayKey();
   if (viewExists(dbPath, 'v_receivable')) {
     const rows = safeQuery(dbPath,
       `SELECT "customer" AS c, SUM("receivable") AS s, MIN("date") AS d
        FROM "v_receivable"
        WHERE "receivable" IS NOT NULL AND "receivable" > 0 AND date("date") < date(?, ?)
        GROUP BY "customer" ORDER BY s DESC LIMIT ?`,
-      [today, `-${overdueDays} day`, limit]);
+      [day, `-${overdueDays} day`, limit]);
     if (rows) {
       return rows.map((r) => ({
         customer: r.c || '(未标注客户)',
         amount: Number(r.s || 0),
         dueDate: r.d || null,
-        overdueDays: r.d ? Math.max(0, Math.round((new Date(today) - new Date(r.d)) / 86400000)) : null,
+        overdueDays: r.d ? Math.max(0, Math.round((new Date(day) - new Date(r.d)) / 86400000)) : null,
       }));
     }
     // 视图查询失败 → 落到逐表回退
@@ -124,7 +136,7 @@ function listOverdueReceivables(dbPath, { today, overdueDays = 30, limit = 20 } 
   try {
     const tables = listTables().filter((t) => (!dbPath || t.dbPath === dbPath) && t.role === 'receivable' && !t.superseded);
     const sqliteTableNames = getSQLiteTableNames(dbPath);
-    const overdueDate = new Date(today);
+    const overdueDate = new Date(day);
     overdueDate.setDate(overdueDate.getDate() - overdueDays);
     const overdueDateStr = overdueDate.toISOString().slice(0, 10);
     for (const t of tables) {
@@ -146,7 +158,7 @@ function listOverdueReceivables(dbPath, { today, overdueDays = 30, limit = 20 } 
           customer: r.c || '(未标注客户)',
           amount: Number(r.s),
           dueDate: r.d || null,
-          overdueDays: r.d ? Math.max(0, Math.round((new Date(today) - new Date(r.d)) / 86400000)) : null,
+          overdueDays: r.d ? Math.max(0, Math.round((new Date(day) - new Date(r.d)) / 86400000)) : null,
         });
       }
     }
@@ -163,14 +175,17 @@ function listOverdueReceivables(dbPath, { today, overdueDays = 30, limit = 20 } 
  * @returns {Array<{customer: string|null, amount: number|null, expireDate: string, daysLeft: number}>}
  */
 function listExpiringContracts(dbPath, { today, days = 30, limit = 20 } = {}) {
-  const daysLeftOf = (d) => Math.max(0, Math.round((new Date(d) - new Date(today)) / 86400000));
+  // 2026-09-30 深度检查修复: today 同等兜底(见 listOverdueReceivables 注释)——
+  // briefing-handler.js:73 不传 today 时此前恒返回 []。
+  const day = today || localDayKey();
+  const daysLeftOf = (d) => Math.max(0, Math.round((new Date(d) - new Date(day)) / 86400000));
   if (viewExists(dbPath, 'v_contract')) {
     const rows = safeQuery(dbPath,
       `SELECT "customer" AS c, SUM("contract") AS s, MIN("date") AS d, COUNT(*) AS n
        FROM "v_contract"
        WHERE date("date") BETWEEN date(?) AND date(?, ?)
        GROUP BY "customer", "date" ORDER BY d ASC LIMIT ?`,
-      [today, today, `+${days} day`, limit]);
+      [day, day, `+${days} day`, limit]);
     if (rows) {
       return rows.map((r) => ({
         customer: r.c || null,
@@ -186,7 +201,7 @@ function listExpiringContracts(dbPath, { today, days = 30, limit = 20 } = {}) {
   try {
     const tables = listTables().filter((t) => (!dbPath || t.dbPath === dbPath) && t.role === 'contract' && !t.superseded);
     const sqliteTableNames = getSQLiteTableNames(dbPath);
-    const end = new Date(today);
+    const end = new Date(day);
     end.setDate(end.getDate() + days);
     const endStr = end.toISOString().slice(0, 10);
     for (const t of tables) {
@@ -201,7 +216,7 @@ function listExpiringContracts(dbPath, { today, days = 30, limit = 20 } = {}) {
          FROM "${tableName.replace(/"/g, '""')}"
          WHERE date("${dateCol.replace(/"/g, '""')}") BETWEEN date(?) AND date(?)
          ORDER BY d ASC LIMIT ?`,
-        [today, endStr, limit]);
+        [day, endStr, limit]);
       for (const r of rows || []) {
         if (!r.d) continue;
         out.push({ customer: r.c || null, amount: r.s != null ? Number(r.s) : null, expireDate: r.d, daysLeft: daysLeftOf(r.d), count: 1 });

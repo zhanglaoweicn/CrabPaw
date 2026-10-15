@@ -710,7 +710,6 @@ async function handleHyperFramesTranscribe(params, _context) {
   }
 
   const projectDir = path.resolve(PROJECT_DIR);
-  const isImport = /\.(srt|vtt|json)$/i.test(input_path);
   const taskId = `hft_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const surfaceId = `hyperframes_${taskId}`;
 

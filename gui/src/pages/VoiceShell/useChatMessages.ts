@@ -72,20 +72,41 @@ export function useChatMessages(flow: VoiceChatFlow) {
   const lastAiPushedRef = useRef('')
   useEffect(() => {
     const aiTextNow = flow.aiText || ''
+    // 2026-10-09 生图展示修复: 收集本轮流内生成的图片(file_generated 事件),
+    // 落卡时作为 AI 消息附件渲染成图片气泡——此前该事件全 GUI 无消费者,
+    // 生成的图只进任务面板 store, 对话流里不可见(用户实测"说生成了但没看到")。
+    const files: ChatMsgFile[] = (flow.generatedFiles || [])
+      .filter(f => f.path && f.type === 'image')
+      .map(f => ({
+        path: f.path,
+        name: f.name || f.path.split(/[/\\]/).pop() || f.path,
+        size: f.size,
+        type: 'image',
+      }))
+    const fileSig = files.map(f => f.path).join('|')
     // 回复流未结束或 TTS 播放中或仍在 pending → 等完成
     if (!flow.replyCompleted || flow.ttsPlaying || flow.isSpeaking || flow.pending) return
     // 2026-08-14(用户反馈): 工具调用记录不再进对话卡——工具逻辑已由侧栏承载
     // (右栏"工具执行"状态卡 flow.toolEvents)。对话窗口保持纯消息线程(AG-UI 语义:
     // message thread 与 tool events 分离)。无 AI 文本的纯工具任务不落对话卡。
-    if (!aiTextNow.trim()) return
-    // 避免重复 push（同一条 aiText 只 push 一次）
-    if (lastAiPushedRef.current === aiTextNow) return
-    lastAiPushedRef.current = aiTextNow
+    // 2026-10-09: 有生成图片时纯图片也落卡(空文本+图 = 纯出图任务)。
+    if (!aiTextNow.trim() && files.length === 0) return
+    // 避免重复 push（同一条 aiText+文件集只 push 一次）; 去重键带文件签名——
+    // 晚到的图片(并行下载完成晚于回复流)会推一条只含新图的补充气泡。
+    const [prevText = '', prevSig = ''] = lastAiPushedRef.current ? lastAiPushedRef.current.split('::') : []
+    const pushKey = `${aiTextNow}::${fileSig}`
+    if (lastAiPushedRef.current === pushKey) return
+    const prevPaths = new Set(prevSig.split('|').filter(Boolean))
+    const newFiles = files.filter(f => !prevPaths.has(f.path))
+    if (newFiles.length === 0 && (!aiTextNow.trim() || prevText === aiTextNow)) return
+    lastAiPushedRef.current = pushKey
+    // 首推带文本; 补充气泡只带新图(文本已推过, 不重复)
+    const textToPush = (aiTextNow.trim() && prevText !== aiTextNow) ? aiTextNow : ''
     // 2026-08-19 三栏联动轮: AI 落卡带轮次(最近一轮的 round, 与时间线/工具批对齐)
-    pushChat('ai', aiTextNow, undefined, lastUserRoundRef.current ?? undefined)
+    pushChat('ai', textToPush, undefined, lastUserRoundRef.current ?? undefined, newFiles)
     // 新对话开始时 reset（aiText 清空时）
     if (!aiTextNow) lastAiPushedRef.current = ''
-  }, [flow.aiText, flow.replyCompleted, flow.ttsPlaying, flow.isSpeaking, flow.pending, flow.toolEvents, pushChat])
+  }, [flow.aiText, flow.replyCompleted, flow.ttsPlaying, flow.isSpeaking, flow.pending, flow.toolEvents, flow.generatedFiles, pushChat])
 
   // ── 2026-08-19 三栏联动轮: 工具批历史(对话流工具链回看数据源) ──
   // flow.toolEvents 每轮清空重填(sendText 清空)——清空即旧批收官, 归档到轮次。

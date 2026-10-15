@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useChatStream } from './useChatStream'
+import { useChatStream, type GeneratedFile } from './useChatStream'
 import { useVoiceReply, type VoiceConfig } from './useVoiceReply'
 import { useVoiceState } from '../contexts/VoiceStateContext'
 import { useSse } from './useSSE'
@@ -67,6 +67,20 @@ export function useVoiceChatFlow(
   // 2026-08-14: 当前思考内容(SSE thinking 事件,完整离散状态消息)——供中栏"思维条"
   // 实时展示(AG-UI REASONING 语义)。sendText 清空,onThinking 更新。
   const [currentThinking, setCurrentThinking] = useState('')
+  // 2026-10-09 生图展示修复: 本轮流内生成的图片文件(file_generated SSE 事件)——
+  // 此前该事件无任何消费者, 生成的图片只落在任务面板 store(需手动打开面板),
+  // 对话流里完全不可见(用户实测"说生成了但没看到")。收集后由 useChatMessages
+  // 落卡时作为 AI 消息附件渲染成图片气泡。与 aiText 同一代际(逐轮清空)。
+  // 注意: 声明位置在 currentThinking 之后——本 hook 的测试(useVoiceChatFlow.test)
+  // 以 useState 槽位序号取 state, 在既有槽位之间插入会整体后移导致测试错位。
+  const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([])
+  // 2026-10-10 生图任务卡: 每个 ImageGenerate 工具调用一个槽位——tool_call 建槽
+  // (running + 提示词摘要), tool_result 回填状态与图片路径(从双层 JSON 结果解析),
+  // file_generated 作无 resultPayload 时的兜底。供 ImageGenCard 展示生成过程与成图。
+  // 与 toolEvents 同一代际(逐轮清空)。
+  const [imageGenSlots, setImageGenSlots] = useState<Array<{
+    toolId: string; prompt: string; status: 'running' | 'done' | 'error'; imagePath?: string
+  }>>([])
 
   // P5.5: pending 兜底 — 发送后 10s 未收到回复流则回落（防卡 thinking）
   useEffect(() => {
@@ -158,6 +172,10 @@ export function useVoiceChatFlow(
     setReplyCompleted(false)
     // 2026-08-13 P2-1: 本轮流内工具记录清空(与代际同周期)
     setToolEvents([])
+    // 2026-10-09: 新轮次清空上轮生成的图片文件(与 toolEvents 同周期)
+    setGeneratedFiles([])
+    // 2026-10-10: 生图任务卡槽位同步清空
+    setImageGenSlots([])
     // 2026-08-14: 新轮次清空当前思考(思维条随轮次重置)
     setCurrentThinking('')
     // P2: 递增流代际——旧流回调(onStreamEnd/onError)捕获自己的 gen,
@@ -337,6 +355,12 @@ export function useVoiceChatFlow(
             // 2026-08-14: 参数透传(此前丢弃)——右栏/卡片展示"调用了什么"
             args: item.toolArgs || undefined,
           }])
+          // 2026-10-10 生图任务卡: ImageGenerate 调用建槽(running + 提示词摘要)
+          if (item.toolName === 'ImageGenerate') {
+            let prompt = ''
+            try { prompt = String(JSON.parse(item.toolArgs || '{}').prompt || '').replace(/\s+/g, ' ').slice(0, 60) } catch (e) { /* args 非 JSON 时留空 */ }
+            setImageGenSlots(prev => prev.some(s => s.toolId === item.toolId) ? prev : [...prev, { toolId: item.toolId, prompt, status: 'running' }])
+          }
         },
         onToolResult: (r) => {
           if (generationRef.current !== gen) return
@@ -358,11 +382,49 @@ export function useVoiceChatFlow(
             if (!r.toolName) return prev
             return [...prev, { toolId: r.toolId, toolName: r.toolName, status, summary, result }]
           })
+          // 2026-10-10 生图任务卡: ImageGenerate 结果回填槽位状态 + 图片路径
+          // (resultPayload.content 为双层 JSON: {success, content: "<内层响应>"},
+          //  image_path 在内层响应顶层——与后端 ai.js 后处理块同口径)
+          if (r.toolName === 'ImageGenerate') {
+            setImageGenSlots(prev => {
+              let imagePath: string | undefined
+              try {
+                const payload = r.resultPayload
+                if (payload && typeof payload.content === 'string') {
+                  const l1 = JSON.parse(payload.content)
+                  const l2 = typeof l1.content === 'string' ? JSON.parse(l1.content) : l1
+                  imagePath = l2.image_path || (l2.images && l2.images[0] && l2.images[0].file_path) || undefined
+                }
+              } catch (e) { /* 结果载荷不可解析时保持无图, 由 file_generated 兜底 */ }
+              const idx = prev.findIndex(s => s.toolId === r.toolId)
+              if (idx < 0) {
+                return [...prev, { toolId: r.toolId, prompt: '', status: r.success ? 'done' : 'error', imagePath }]
+              }
+              const next = [...prev]
+              next[idx] = { ...next[idx], status: r.success ? 'done' : 'error', imagePath: imagePath ?? next[idx].imagePath }
+              return next
+            })
+          }
         },
         // 2026-08-14: 当前思考(SSE thinking 完整离散状态消息)——中栏思维条数据源
         onThinking: (content) => {
           if (generationRef.current !== gen) return
           if (content) setCurrentThinking(content)
+        },
+        // 2026-10-09 生图展示修复: 收集本轮生成的图片文件(file_generated SSE),
+        // 落卡时作为 AI 消息附件渲染成图片气泡(此前该事件全 GUI 无消费者)
+        onFileGenerated: (file) => {
+          if (generationRef.current !== gen) return
+          if (!file?.path || file.type !== 'image') return
+          setGeneratedFiles(prev => prev.some(f => f.path === file.path) ? prev : [...prev, file])
+          // 2026-10-10 生图任务卡兜底: resultPayload 缺失时按 FIFO 补到首个无图槽位
+          setImageGenSlots(prev => {
+            const idx = prev.findIndex(s => s.status === 'running' && !s.imagePath)
+            if (idx < 0) return prev
+            const next = [...prev]
+            next[idx] = { ...next[idx], imagePath: file.path }
+            return next
+          })
         },
       }
     )
@@ -504,6 +566,10 @@ export function useVoiceChatFlow(
     getConversationId: () => convIdRef.current,
     // 2026-08-13 P2-1: 本轮流内工具调用记录(供右栏"工具执行"过程卡)
     toolEvents,
+    // 2026-10-09 生图展示修复: 本轮流内生成的图片文件(对话流图片气泡数据源)
+    generatedFiles,
+    // 2026-10-10 生图任务卡: ImageGenerate 槽位(生成过程 + 成图展示)
+    imageGenSlots,
     // 2026-08-14: 当前思考内容(供中栏"思维条"实时展示)
     currentThinking,
     // 2026-08-13 P2-4: 会话生命周期控制

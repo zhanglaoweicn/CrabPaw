@@ -119,7 +119,7 @@ afterAll(async () => {
   jest.clearAllTimers();
 });
 
-function makeConfig(userId) {
+function makeConfig(_userId) {
   return {
     chatChannel: ['none'],
     models: {

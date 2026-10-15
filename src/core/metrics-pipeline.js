@@ -1,4 +1,4 @@
-﻿/**
+/**
  * MetricsPipeline — 统一指标收集管道
  *
  * 整合 diagnostic-custodian + usage-stats + cost-tracker + health-monitor，
@@ -12,7 +12,11 @@ const path = require("path");
 const { DATA_DIR } = require("./config");
 const { atomicWriteFile } = require("./atomic-write");
 
-const METRICS_DIR = path.join(DATA_DIR, ".crabpaw", "metrics");
+// 2026-09-30 深度检查修复: 此前 path.join(DATA_DIR, ".crabpaw", "metrics") —— DATA_DIR
+// 本身已以 .crabpaw 结尾(config.js:118-121), 于是指标实际写在
+// data/.crabpaw/.crabpaw/metrics/ 双嵌套层。config.js 的启动迁移一直在把嵌套层往
+// 上搬, 但源头没修 → 永远搬不完(HARNESS.md:155 已宣称"归并单层"却与代码不符)。
+const METRICS_DIR = path.join(DATA_DIR, "metrics");
 const SNAPSHOT_INTERVAL_MS = 30000;
 // 2026-09-18: 旧实现每次快照写全新 snapshot_<时间戳>.json,不轮换不清理——实测
 // 堆积 263 万个文件(磁盘被吃 + jest 全树爬取挂死),且无任何读取方(消费方全部

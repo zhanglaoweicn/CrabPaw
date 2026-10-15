@@ -34,6 +34,30 @@ function _archiveDir() {
   return path.join(DATA_DIR, ARCHIVE_DIR_NAME);
 }
 
+/**
+ * 2026-10-09 分层加载协议: 存档引用校验——ContextDrillDown(source=archive) 用。
+ * 只放行 _archiveDir() 内、且文件名匹配本模块命名规则(history-*.txt)的路径，
+ * 防把工具当任意文件读取器用（读正文仍需走 Read 工具的路径权限）。
+ */
+function isArchivePath(candidatePath) {
+  if (!candidatePath || typeof candidatePath !== 'string') return false;
+  let resolved;
+  try {
+    resolved = path.resolve(candidatePath);
+  } catch {
+    return false;
+  }
+  const dir = path.resolve(_archiveDir());
+  const rel = path.relative(dir, resolved);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+  return ARCHIVE_PREFIX === 'history-' && /^history-[0-9a-z]+-[0-9a-f]{10}\.txt$/i.test(path.basename(resolved));
+}
+
+/** 存档目录绝对路径（工具层展示/校验用） */
+function archiveDir() {
+  return path.resolve(_archiveDir());
+}
+
 function isArchivedContent(content) {
   return typeof content === 'string' && content.includes(ARCHIVE_NOTE_HEAD);
 }
@@ -91,6 +115,8 @@ module.exports = {
   compactMessageContent,
   compactHistoryMessages,
   isArchivedContent,
+  isArchivePath,
+  archiveDir,
   HISTORY_ARCHIVE_THRESHOLD_CHARS,
   HISTORY_PREVIEW_CHARS,
 };

@@ -149,10 +149,14 @@ function handleInspect(params) {
   const info = preset.envSchema
     .map((f) => `- ${f.label}${f.required ? '（必填）' : ''}：${f.hint}`)
     .join('\n');
+  // 2026-10-09: http 形态无需装组件，接入步骤文案分流
+  const plan = preset.commandPlan.kind === 'http'
+    ? `我将做两件事：① 写入连接配置（经你确认）② 连接并报出发现的工具。`
+    : `我将做三件事：① 联网安装组件 ${preset.install.package}（一次性，经你确认）② 写入连接配置（经你确认）③ 连接并报出发现的工具。`;
   return _toolResult(
     `【${preset.name}】接入计划\n` +
       `${preset.vendorNote}\n接通后效果：${preset.benefits}\n\n` +
-      `我将做三件事：① 联网安装组件 ${preset.install.package}（一次性，经你确认）② 写入连接配置（经你确认）③ 连接并报出发现的工具。\n\n` +
+      `${plan}\n\n` +
       `需要你提供：\n${info}\n\n` +
       `准备好后直接把这几项发我（一次发齐或分条都行），密码只在写入配置时使用，不会复述。`,
     { connectorId: preset.id }
@@ -182,6 +186,10 @@ function handleProbe(params) {
 
 /** 确保组件已安装（configure 前置），失败时返回可读诊断 */
 async function _ensureInstalled(preset) {
+  // 2026-10-09: http 形态连接器（如 OpenViking）无需本地组件，直接就绪
+  if (preset.commandPlan.kind === 'http') {
+    return { ok: true, reused: true, skipped: true };
+  }
   const libDir = getMcpLibDir(preset.id);
   const importable = await _isImportable(preset, libDir);
   if (importable.ok) return { ok: true, pythonPath: importable.pythonPath, libDir, reused: true };
@@ -220,12 +228,13 @@ async function handleConfigure(params) {
     await mgr.addServer(preset.serverName, serverConfig);
   } catch (e) {
     const msg = String((e && e.message) || e);
+    // 2026-10-09: 排障提示按连接器形态分流，不再写死金蝶
+    const tips = preset.commandPlan.kind === 'http'
+      ? `常见原因：① 服务地址不对（要能从本机访问到 openviking-server 的 MCP 端点）② 用户 Key 无效或用了 root key ③ 服务未启动。`
+      : `常见原因：① 服务器地址不对（要浏览器能打开且以 /k3cloud/ 结尾）② 账套 ID/账号/密码有误 ③ 金蝶服务器不在同一网络。`;
     return {
       success: false,
-      content:
-        `${preset.name} 组件装好了，但连接金蝶失败：${msg}\n` +
-        `常见原因：① 服务器地址不对（要浏览器能打开且以 /k3cloud/ 结尾）② 账套 ID/账号/密码有误 ③ 金蝶服务器不在同一网络。` +
-        `修正后重新发我即可。`,
+      content: `${preset.name} 连接失败：${msg}\n${tips}修正后重新发我即可。`,
     };
   }
   await mgr.saveServerConfig(preset.serverName, serverConfig);
@@ -233,22 +242,28 @@ async function handleConfigure(params) {
   // ③ 验货：报出发现的工具（tools/list 成功 = 连接可用）
   const server = mgr.getServer(preset.serverName);
   const tools = ((server && server.tools) || []).map((t) => t.name);
+  const isHttp = preset.commandPlan.kind === 'http';
+  const componentLine = isHttp
+    ? `连接方式: 远端 MCP 服务（无需本地组件）`
+    : `组件: ${preset.install.package}${inst.reused ? '（此前已装，复用）' : ''}`;
   return {
     success: true,
     content:
       `【${preset.name}】接入完成 ✓\n` +
-      `组件: ${preset.install.package}${inst.reused ? '（此前已装，复用）' : ''}\n` +
+      `${componentLine}\n` +
       `连接: 已建立，发现 ${tools.length} 个工具\n` +
       tools.map((n) => `- ${n}`).join('\n') +
       `\n配置已保存（重启自动重连）。现在可以直接问业务问题，比如"本月应收多少"。`,
     serverName: preset.serverName,
     toolCount: tools.length,
     // 打码后的配置快照（secret 为 ••••，凭证值绝不出现在对话）
-    configMasked: {
-      command: serverConfig.command,
-      args: serverConfig.args,
-      env: maskEnv(preset, serverConfig.env),
-    },
+    configMasked: isHttp
+      ? { url: serverConfig.url, headers: { Authorization: 'Bearer ••••••' } }
+      : {
+          command: serverConfig.command,
+          args: serverConfig.args,
+          env: maskEnv(preset, serverConfig.env),
+        },
   };
 }
 
@@ -309,6 +324,9 @@ async function handleManage(params) {
       const preset = getConnector(params.connector);
       if (!preset) return { success: false, content: `未知连接器「${params.connector}」` };
       const r = await _ensureInstalled(preset);
+      if (r.ok && r.skipped) {
+        return _toolResult(`${preset.name} 为远端服务形态，无需本地安装，直接 configure 即可。`);
+      }
       return r.ok
         ? _toolResult(`组件 ${preset.install.package} ${r.reused ? '此前已装，复用' : '安装完成'}。`)
         : { success: false, content: `安装失败: ${r.error}${r.hint ? `\n${r.hint}` : ''}` };

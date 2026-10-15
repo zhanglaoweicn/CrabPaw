@@ -82,7 +82,7 @@ lazyRequire('scheduler', () => {
   const { getScheduler } = require('./scheduler');
   const { getGlobalScheduler } = require('./scheduler-bridge');
   const pick = () => getGlobalScheduler() || getScheduler();
-  const sched = getScheduler();
+  getScheduler();
   return {
     list() {
       return (pick().tasks || []).map(t => ({

@@ -109,7 +109,26 @@ const TASK_CATEGORIES = {
   }
 };
 
+// 2026-10-10: 图像生成意图判定(具名导出)——供 chat-handler(跳过 taskflow 工作
+// 流建议注入)与 ai.js isFileGenIntent(不误开文档生成卡)复用, 全端一个口径。
+const IMAGE_INTENT_RE = /(?:生成|制作|设计|画|绘制|出|来)[一组张幅个]{0,3}.{0,10}(?:电商)?(?:图片|插画|海报|封面|配图|主图|详情页|产品图|商品图|头像|壁纸|表情包|示意图)|手绘风格|(?:商品|产品|电商)图/i;
+function isImageGenerationIntent(text) {
+  return IMAGE_INTENT_RE.test(String(text || ''));
+}
+
 const INTENT_PATTERNS = [
+  {
+    // 2026-10-09: 图像生成意图 → handdraw-style 手绘风格提示词库。此前"生成一组
+    // 电商图片"被类目关键词引向 marketing, handraw-style 技能从未激活——用户实测
+    // 同技能在 WORKBUDDY 出图满意、本端糟糕, 根因即技能未参与(通用摄影提示词
+    // 缺少风格库的版式/配色/风格契约)。curated: true = 人工策划的高精度映射,
+    // 知识型技能(无 executor)按 0.6 折而非 0.15(与类目分支知识技能系数一致)。
+    pattern: IMAGE_INTENT_RE,
+    category: 'IMAGE_GENERATION',
+    skillHint: 'handdraw-style-prompter',
+    curated: true,
+    confidence: 0.92
+  },
   {
     pattern: /(?:分析|统计).*(?:数据|报表|图表)/i,
     category: 'DATA_ANALYSIS',
@@ -512,11 +531,12 @@ class SkillRouter {
     const input = userInput.toLowerCase();
     const results = [];
 
-    for (const { pattern, category, skillHint, confidence } of INTENT_PATTERNS) {
+    for (const { pattern, category, skillHint, confidence, curated } of INTENT_PATTERNS) {
       if (pattern.test(input)) {
         results.push({
           category,
           skillHint,
+          curated,
           confidence,
           matched: true
         });
@@ -591,7 +611,11 @@ class SkillRouter {
       const hasExec = skill ? this._skillHasExecutor(skill) : true
       if (skill) {
         const penalty = qualityPenalties[classification.skillHint] ?? 1.0;
-        const execPenalty = hasExec ? 1.0 : 0.15; // 无 executor 大幅降权
+        // 2026-10-09: curated(人工策划的高精度意图映射)知识技能按 0.6 折——
+        // 与类目分支知识技能系数一致; 非 curated 的弱匹配维持 0.15 强抑制。
+        // 此前一律 0.15 → 0.92 置信度的 curated 命中(0.138)反而输给类目关键词
+        // 推荐(≈0.37), handraw-style 技能从未被激活(用户实测 WORKBUDDY 对比)。
+        const execPenalty = hasExec ? 1.0 : (classification.curated ? 0.6 : 0.15);
         recommendations.push({
           name: classification.skillHint,
           score: classification.confidence * penalty * execPenalty,
@@ -673,6 +697,18 @@ class SkillRouter {
     } catch (e) { console.warn('[skill-router] Failed to match capabilities:', e.message); }
 
     recommendations.sort((a, b) => b.score - a.score);
+
+    // 2026-10-10: curated 意图(人工策划映射, confidence ≥0.9)强制置顶——
+    // 专家技能包 ×1.3 偏置不得覆盖用户显式意图(实测: 电商运营专家激活时,
+    // "生成一组电商图片"的生图意图被专家包的 marketing 压过, handdraw-style
+    // 从未激活, 用户对比 WORKBUDDY 出图质量断崖)。
+    if (classification.curated && classification.skillHint) {
+      const hitIdx = recommendations.findIndex(r => r.name === classification.skillHint);
+      if (hitIdx > 0) {
+        const [hit] = recommendations.splice(hitIdx, 1);
+        recommendations.unshift(hit);
+      }
+    }
 
     // 增强推荐：加入技能组合推荐
     if (this._compositionInitialized && this._discoveryEngine) {
@@ -1045,6 +1081,7 @@ function initializeRouter(skillRegistry) {
 }
 
 module.exports = {
+  isImageGenerationIntent,
   SkillRouter,
   globalSkillRouter,
   initializeRouter,

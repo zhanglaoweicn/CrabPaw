@@ -58,7 +58,6 @@ function routeAndActivate(userId, message) {
   const api = getExpertsApi();
   let results = [];
   try { results = api.routeMessage(message) || [] } catch (e) { console.warn('[expert-context] 路由失败:', e?.message || e); return renderState(userId); }
-  const best = (results || []).find(r => r && typeof r.score === 'number') || null;
   // 按分数排序取最高
   const sorted = [...(results || [])].sort((a, b) => (b.score || 0) - (a.score || 0));
   const top = sorted[0];

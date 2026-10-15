@@ -10,6 +10,7 @@
 | 专家库 `data/experts-from-agency-agents.json`（267 个角色中文化改编） | [agency-agents](https://github.com/msitarzewski/agency-agents) 及其中文社区版 [agency-agents-zh](https://github.com/jnMetaCode/agency-agents-zh) | MIT（遵循上游署名要求，本说明即署名） |
 | 技能 `healthcheck` / `system-info` / `weather` 的元数据结构 | 改编自 OpenClaw 技能元数据格式，正文与实现为本项目重写 | MIT |
 | 语音唤醒模型 `gui/resources/kws-model/` | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 发布的预训练模型 | Apache License 2.0 |
+| UI 字体 `gui/src/assets/fonts/inter-latin-*.woff2` | [Inter](https://github.com/rsms/inter)（自托管 woff2 子集，仅 latin/latin-ext，由 `scripts/fetch-inter-fonts.js` 生成） | SIL Open Font License 1.1 — Copyright (c) 2016 The Inter Project Authors |
 
 ## 运行时引入、不随仓库分发的组件
 

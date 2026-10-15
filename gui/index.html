@@ -5,6 +5,11 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CrabPaw</title>
+    <!-- 2026-09-30 离线地基: 自托管 Inter 可变字体预取（单文件覆盖 400/600 字重）——
+         与 fonts.css 的 font-display:swap 配合，保证首帧就用正确字体。此前走 Google Fonts：
+         离线要等网络超时，且字体异步到达会让数字先以系统字体渲染再跳变。路径由 Vite 处理，
+         运行时零网络请求。字体由 scripts/fetch-inter-fonts.js 生成。 -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="./src/assets/fonts/inter-latin-var.woff2" />
     <!-- 2026-08-22 黑屏修复轮: 触发 vite full-reload 重建渲染管线 -->
     <script>
       (function() {

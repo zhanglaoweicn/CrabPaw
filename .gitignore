@@ -85,11 +85,25 @@ coverage/
 evals/snapshots/latest.json
 
 # 数据目录（包含用户数据）
-data/.crabpaw/
-data/skills/
-data/workspace/
-data/projects/
-data/*.md
+# 2026-09-30 深度检查修复: 此前只点名 data/ 下若干具体子目录, 缺兜底——实测
+# `git add -A` 会把 data/business/business.db(真实经营数据: 应收/合同/销售明细)、
+# data/backups/config.*.json(内含明文 voice.volcAsrApiKey / search.baiduApiKey)、
+# data/crabpaw-data-backup/*.db(记忆/历史库) 一并暂存。改为整目录兜底 + 白名单,
+# 新增 data/ 子目录默认不入库(与 .gitignore:15-19 密钥变体那条同一教训)。
+# 2026-10-09 修复白名单失效: 原写 `data/`(目录本身被忽略)时 git 对子路径剪枝,
+# 下方全部 ! 否定永不评估(check-ignore 实测全部命中 data/ 规则)。必须写
+# `data/*`(只忽略目录内容)否定才生效。
+data/*
+# 白名单: 仓库当前已跟踪的 data/ 资产(兜底规则不会删除已跟踪文件, 显式列出以防误读)
+!data/.piper.json
+!data/data-sources.json
+!data/experts-from-agency-agents.json
+!data/experts-org.json
+!data/pptx-color-schemes-36.json
+!data/piper-models/
+!data/piper-models/**
+!data/skills/
+!data/skills/**
 CrabPaw-Data/
 gui/data/.crabpaw/
 # 2026-08-13 最终审查: e2e 运行临时用户数据(20MB,防 git add -A 误提交)
@@ -159,6 +173,12 @@ docs/commercial/
 docs/superpowers/
 docs/audit/
 docs/retrospective/
+# 2026-09-30 深度检查修复: cdp-diag/ 是开发机调试/发版辅助目录(实测 75 个未跟踪文件,
+# 含 extract-keys-snap.ps1 / strip-secrets-from-zip.mjs / rel-v.json / 35MB 日志),
+# 与公开仓发布无关, 整体忽略防「一次 git add -A」带进去。
+cdp-diag/
+# 2026-09-30: .v2c 是本地 video2code CLI 插件缓存指针(内容为 %USERPROFILE% 下绝对路径), 与项目无关
+.v2c/
 docs/final-harness-gap-analysis-2026-06-29.md
 docs/harness-completeness-audit-2026-06-29.md
 docs/intelligence-audit-2026-06-29.md
@@ -195,3 +215,32 @@ data/tmp_pip/
 data/tmp_*.json
 data/expert-stats.json
 debug.log
+
+# ===== 运行时数据与一次性诊断遗留（2026-10-15 技术债治理）=====
+# data/ 下仅保留被跟踪的静态配置（.piper.json / data-sources.json / experts*.json /
+# piper-models/*.onnx.json / pptx-color-schemes / skills/pdf-to-word-docx），以下为运行时状态：
+data/announcements/
+data/assessment/
+data/backups/
+data/cache/
+data/cloakbrowser/
+data/collabs/
+data/crabpaw-data-backup/
+data/piper-models/
+data/task-versions/
+data/workspace/
+data/audit-log.json
+data/awakening-cache.json
+data/tmp_stock.json
+# CDP 一次性诊断目录（含 35MB pcm/wav/日志；历史敏感备份曾出现于此，整目录忽略）
+cdp-diag/
+data/skills/.clawhub-cache.json
+data/skills/.drafts/
+# 运行时从 clawhub 市场安装的第三方技能（41MB）不进仓；仅保留内置 pdf-to-word-docx
+data/skills/*
+!data/skills/pdf-to-word-docx/
+# WorkBuddy 会话工作数据（记忆日志等）不进仓
+.workbuddy/
+
+# 治理文档例外: AI.JS 拆分方案是正式技术文档, 非"生成的 AI 报告"
+!docs/AI.JS*.md

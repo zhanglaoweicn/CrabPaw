@@ -235,7 +235,7 @@ describe('knowledge-tools（KbSearch/KbList）', () => {
 
   test('KbList 返回文档清单（清单≠检索证据）', async () => {
     global.__kbEngine = undefined; // KbList 不走引擎, 用真实 store mock
-    const { getUnifiedStore } = require('../core/memory/unified-store');
+    require('../core/memory/unified-store');
     const store = new (require('../core/memory/unified-store').UnifiedMemoryStore)({ dbPath: ':memory:' });
     store.initialize();
     store.upsertDocument({ title: '清单文档', content: 'x', metadata: JSON.stringify({ source: 'document_analysis' }) });

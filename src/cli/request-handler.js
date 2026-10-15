@@ -60,6 +60,8 @@ const _localVision = require('../handlers/local-handlers/vision');
 const _localTasks = require('../handlers/local-handlers/tasks');
 const _localCockpit = require('../handlers/local-handlers/cockpit');
 const _localBriefing = require('../handlers/local-handlers/briefing-handler');
+// 2026-09-30 P2 数据出处链："这数从哪来"——来源表/导入时间/行数/空值数
+const _localProvenance = require('../handlers/local-handlers/provenance-handler');
 const { createSessionHandlers } = require('./handlers/session-handlers');
 const { createProjectHandlers } = require('./handlers/project-handlers');
 const PUBLIC_ROUTES_BY_METHOD = {
@@ -386,6 +388,8 @@ const ROUTE_TABLE = [
   { method: 'GET', pattern: /^\/api\/cockpit\/overview$/, handler: 'handleCockpitOverview' },
   // 2026-09-21 晨报带: VoiceShell 零输入信息层(营收/风险/日程单端点聚合)
   { method: 'GET', pattern: /^\/api\/briefing\/today$/, handler: 'handleBriefingToday' },
+  // 2026-09-30 P2 数据出处链：来源表/导入时间/行数/空值数（ok:false 表示取不到数，不是"没有数"）
+  { method: 'GET', pattern: /^\/api\/business\/provenance$/, handler: 'handleBusinessProvenance' },
   { method: 'DELETE', pattern: /^\/api\/usage$/, handler: 'handleUsageReset' },
   { method: 'GET', pattern: /^\/api\/audit$/, handler: 'handleAuditLogs' },
   { method: 'GET', pattern: /^\/api\/audit\/stats$/, handler: 'handleAuditStats' },
@@ -603,6 +607,7 @@ Object.assign(LOCAL_HANDLERS, _localHealing);
 Object.assign(LOCAL_HANDLERS, _localEvolution);
 Object.assign(LOCAL_HANDLERS, _localSystem);
 Object.assign(LOCAL_HANDLERS, _localMemoryGraph);
+Object.assign(LOCAL_HANDLERS, _localProvenance);
 Object.assign(LOCAL_HANDLERS, _localTools);
 Object.assign(LOCAL_HANDLERS, _localVoice);
 Object.assign(LOCAL_HANDLERS, _localVoiceTts);

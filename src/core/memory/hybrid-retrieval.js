@@ -2,6 +2,10 @@ const { EventEmitter } = require('events');
 // eslint-disable-next-line no-unused-vars
 const { cosineSimilarity, embeddingToBuffer, bufferToEmbedding } = require('./embedding-router');
 const { NamespaceManager, GLOBAL_NAMESPACE } = require('./namespace-manager');
+// OpenViking 工程逻辑思想移植（2026-10-15）：时间衰减排序 / 召回排除 / 分层摘要
+const { applyEventTimeDecay } = require('./time-decay-ranking');
+const { applyRecallExclusion, SessionRecallLedger } = require('./recall-exclusion');
+const { applyLayeredSummary } = require('./layered-summary');
 
 const DEFAULT_FTS_WEIGHT = 0.4;
 const DEFAULT_VECTOR_WEIGHT = 0.4;
@@ -30,6 +34,11 @@ class HybridRetrievalEngine extends EventEmitter {
 
     // RRF 融合模式（默认启用）
     this._useRRF = config.useRRF !== false;
+
+    // 事件时间衰减排序（OpenViking 思想，默认关闭）：
+    // config.eventDecay = { halfLifeDays, weight, floor }，weight>0 才生效，
+    // 保证既有 eval 基线零回归；启用前建议先跑 npm run eval A/B 对比。
+    this._eventDecay = config.eventDecay || null;
 
     this._queryCache = new Map();
     this._queryCacheMax = 500;
@@ -68,10 +77,17 @@ class HybridRetrievalEngine extends EventEmitter {
     }
     // Graph 通道基于全局实体共现图，不按命名空间隔离
     const graphResults = await this._searchGraph(query, namespace, limit * 2);
+    // 2026-10-09 目录感知第四路（TrieHI 思路）: 记忆树摘要级联先按"目录"(树/命名空间)
+    // 收敛候选,再与 FTS/向量/图谱做 RRF 融合——摘要命中时内容以摘要层参与排序,
+    // 全文经 ContextDrillDown 下钻,避免全文灌上下文。
+    const treeResults = opts.includeTree === false
+      ? []
+      : await this._searchTree(query, namespace, limit * 2);
 
     if (this._useRRF) {
       // RRF 融合模式
-      return this._rrfFusion(ftsResults, vectorResults, graphResults, query, minScore, limit);
+      const fused = this._rrfFusion(ftsResults, vectorResults, graphResults, query, minScore, limit, treeResults);
+      return this._postProcess(fused, opts, namespace);
     }
 
     // 原始加权融合模式（降级兼容）
@@ -116,7 +132,61 @@ class HybridRetrievalEngine extends EventEmitter {
       resultCount: filtered.length,
     });
 
-    return filtered;
+    return this._postProcess(filtered, opts, namespace);
+  }
+
+  /**
+   * 检索后处理管线（OpenViking 工程逻辑思想移植接线，2026-10-15）。
+   * 三步全部可选、默认旁路，保证既有检索行为与 eval 基线零回归：
+   *   ① 事件时间衰减排序 —— 仅当构造时传入 config.eventDecay（weight>0）生效；
+   *   ② 目录级召回排除 —— 仅当调用方传 opts.excludeUris / opts.sessionLedger 生效；
+   *      会话账本命中冷却的条目被剔除，最终结果回写账本（markServed）形成闭环；
+   *   ③ 分层摘要注入 —— 仅当传 opts.summaryDepth（'auto'|'abstract'|'overview'）生效，
+   *      注入层写入 item.injectedText，item.content 原文保留供下钻。
+   * @private
+   */
+  _postProcess(results, opts = {}, _namespace = '') {
+    let items = results || [];
+
+    // ① 事件时间衰减（检索侧，平滑指数半衰期）
+    if (this._eventDecay && items.length) {
+      items = applyEventTimeDecay(items, {
+        weight: this._eventDecay.weight,
+        halfLifeDays: this._eventDecay.halfLifeDays,
+        floor: this._eventDecay.floor,
+      });
+    }
+
+    // ② 目录级召回排除 + 会话冷却账本
+    const wantsExclusion =
+      (Array.isArray(opts.excludeUris) && opts.excludeUris.length > 0) || opts.sessionLedger;
+    if (wantsExclusion && items.length) {
+      const part = applyRecallExclusion(items, { excludeUris: opts.excludeUris, ledger: opts.sessionLedger });
+      items = part.kept;
+      if (part.excluded.length) {
+        this.emit('recall:excluded', { count: part.excluded.length, items: part.excluded.slice(0, 20) });
+      }
+      // 服务闭环：本次真正返回的条目回写会话账本（仅记有 URI 的条目）
+      if (opts.sessionLedger instanceof SessionRecallLedger) {
+        for (const item of items) {
+          const uri = item.uri || item.sourceUri || item.source_uri || item.path;
+          if (uri) opts.sessionLedger.markServed(uri);
+        }
+      }
+    }
+
+    // ③ 分层摘要注入（abstract/overview 选层，原文保留）
+    if (opts.summaryDepth && items.length) {
+      items = applyLayeredSummary(items, {
+        depth: opts.summaryDepth,
+        budgetChars: opts.summaryBudgetChars,
+        // 强制层缺失时从原文现算，预算沿用 summaryBudgetChars（缺省走模块默认值）
+        abstractChars: opts.summaryBudgetChars,
+        overviewChars: opts.summaryBudgetChars,
+      });
+    }
+
+    return items;
   }
 
   async _searchFts(query, namespace, types, limit) {
@@ -332,13 +402,53 @@ class HybridRetrievalEngine extends EventEmitter {
   }
 
   /**
+   * 2026-10-09 目录感知检索第四路：记忆树（memory-tree-v2）摘要级联。
+   * best-effort：树未初始化/为空时返回 []，不影响主检索。
+   * 结果 id 采用 treenode: 前缀避免与其他通道冲突；treeId 供下钻定位。
+   */
+  async _searchTree(query, namespace, limit) {
+    try {
+      const { getMemoryTreeOrchestrator } = require('./memory-tree-v2');
+      const orch = getMemoryTreeOrchestrator();
+      if (!orch || typeof orch.queryTrees !== 'function') return [];
+
+      const hits = await orch.queryTrees(namespace, query, {
+        limit,
+        minLevel: 0,
+        maxLevel: 3,
+      });
+      if (!Array.isArray(hits)) return [];
+
+      return hits
+        .filter(h => h && (h.score || 0) > 0.05)
+        .map(h => ({
+          id: `treenode:${h.id}`,
+          type: 'tree_node',
+          content: h.content || '',
+          title: h.kind === 'summary' ? `记忆树摘要(L${h.level})` : '记忆树条目',
+          namespace: h.namespace || namespace,
+          treeId: h.treeId || null,
+          nodeLevel: h.level,
+          importance: 0.5,
+          updatedAt: (h.timeRangeEnd || Date.now()) / 1000,
+          _treeScore: Math.min(h.score || 0, 1),
+          _source: 'tree',
+        }));
+    } catch (e) {
+      // 树通道 best-effort：记忆树不可用时静默降级为空（首次部署常态）
+      console.debug('[hybrid-retrieval] tree 通道不可用，降级为空:', e.message);
+      return [];
+    }
+  }
+
+  /**
    * Reciprocal Rank Fusion (RRF)
    * 参考 Hindsight 的多路检索融合算法
    *
    * 公式: rrf_score(d) = Σ 1/(k + rank_i(d))
    * 其中 k=60 是平滑参数，rank_i(d) 是文档 d 在第 i 路检索中的排名
    */
-  _rrfFusion(ftsResults, vectorResults, graphResults, query, minScore, limit) {
+  _rrfFusion(ftsResults, vectorResults, graphResults, query, minScore, limit, treeResults = []) {
     const rrfScores = new Map();
     const itemMap = new Map();
 
@@ -347,6 +457,7 @@ class HybridRetrievalEngine extends EventEmitter {
       ...ftsResults.map(r => ({ ...r })),
       ...vectorResults.map(r => ({ ...r })),
       ...graphResults.map(r => ({ ...r })),
+      ...treeResults.map(r => ({ ...r })),
     ];
 
     for (const item of allItems) {
@@ -373,6 +484,14 @@ class HybridRetrievalEngine extends EventEmitter {
     const graphSorted = [...graphResults].sort((a, b) => (b._graphScore || 0) - (a._graphScore || 0));
     for (let rank = 0; rank < graphSorted.length; rank++) {
       const id = graphSorted[rank].id;
+      const score = rrfScores.get(id) || 0;
+      rrfScores.set(id, score + 1 / (RRF_K + rank + 1));
+    }
+
+    // Tree 路排序和 RRF 评分（目录感知第四路，2026-10-09）
+    const treeSorted = [...treeResults].sort((a, b) => (b._treeScore || 0) - (a._treeScore || 0));
+    for (let rank = 0; rank < treeSorted.length; rank++) {
+      const id = treeSorted[rank].id;
       const score = rrfScores.get(id) || 0;
       rrfScores.set(id, score + 1 / (RRF_K + rank + 1));
     }
@@ -417,6 +536,7 @@ class HybridRetrievalEngine extends EventEmitter {
       ftsCount: ftsResults.length,
       vectorCount: vectorResults.length,
       graphCount: graphResults.length,
+      treeCount: treeResults.length,
       resultCount: filtered.length,
       fusionMethod: 'rrf',
     });
@@ -429,6 +549,7 @@ class HybridRetrievalEngine extends EventEmitter {
     if (item._ftsScore) sources.push('fts');
     if (item._vectorScore) sources.push('vector');
     if (item._graphScore) sources.push('graph');
+    if (item._treeScore) sources.push('tree');
     if (sources.length > 1) return 'hybrid';
     return sources[0] || item._source || 'unknown';
   }
@@ -535,17 +656,19 @@ class HybridRetrievalEngine extends EventEmitter {
       fts: '全文检索',
       vector: '向量语义检索',
       graph: '图谱关联检索',
-      hybrid: '混合检索(FTS+向量+图谱)',
+      tree: '记忆树目录检索',
+      hybrid: '混合检索(FTS+向量+图谱+记忆树)',
     };
 
     return {
-      treeType: item.type === 'chunk' ? 'source' : item.type === 'memory' ? 'topic' : 'global',
+      treeType: item.type === 'chunk' || item.type === 'tree_node' ? 'source' : item.type === 'memory' ? 'topic' : 'global',
       treeScope: namespace || 'global',
-      nodeLevel: item.type === 'chunk' ? 0 : item.type === 'memory' ? 1 : 2,
+      nodeLevel: item.type === 'tree_node' ? (item.nodeLevel ?? 0) : item.type === 'chunk' ? 0 : item.type === 'memory' ? 1 : 2,
       nodeId: item.id,
       source: sourceMap[item._source] || item._source,
       searchMethod: item._source,
       documentId: item.documentId || null,
+      treeId: item.treeId || null,
       scores: item.scores || {},
       // 引用溯源：供模型在回答时标注来源
       citation: item.citation || {
@@ -642,4 +765,8 @@ function getHybridRetrievalEngine(config) {
 module.exports = {
   HybridRetrievalEngine,
   getHybridRetrievalEngine,
+  // OpenViking 思想移植模块（2026-10-15）随引擎一并导出，便于上层组合使用
+  timeDecay: require('./time-decay-ranking'),
+  recallExclusion: require('./recall-exclusion'),
+  layeredSummary: require('./layered-summary'),
 };

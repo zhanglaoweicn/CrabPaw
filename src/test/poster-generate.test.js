@@ -5,27 +5,24 @@
  * 尺寸映射。真实 chromium 渲染用例在无浏览器环境自动跳过（另由 E2E 冒烟覆盖）。
  */
 const fs = require('fs');
-const path = require('path');
-const os = require('os');
 
 const poster = require('../core/poster');
-const { escapeHtml } = require('../core/poster/escape');
 const { TEMPLATES } = require('../core/poster/templates');
 const { handlePosterGenerate, handlePosterBrandKit } = require('../tools/poster-tools');
 const { TOOL_CONTRACTS } = require('../core/tool-contract');
 
 describe('品牌资产包', () => {
-  const bak = poster.BRAND_KIT_PATH + '.test-bak';
-  let hadOriginal = false;
+  // 2026-10-15 隔离加固：brand-kit.json 是持久共享存储，多 jest worker 并行时
+  // 跨进程竞态（全量跑偶发假失败）——改用唯一临时文件，全程不触碰真实工作区数据
+  const realPath = require('../core/poster').BRAND_KIT_PATH;
+  const tmpPath = `${realPath}.test-${process.pid}-${Date.now()}`;
 
   beforeAll(() => {
-    hadOriginal = fs.existsSync(poster.BRAND_KIT_PATH);
-    if (hadOriginal) fs.copyFileSync(poster.BRAND_KIT_PATH, bak);
+    poster.setBrandKitPathForTest(tmpPath);
   });
   afterAll(() => {
-    if (hadOriginal) fs.copyFileSync(bak, poster.BRAND_KIT_PATH);
-    else if (fs.existsSync(poster.BRAND_KIT_PATH)) fs.unlinkSync(poster.BRAND_KIT_PATH);
-    if (fs.existsSync(bak)) fs.unlinkSync(bak);
+    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    poster.setBrandKitPathForTest(realPath);
   });
 
   test('set → get 往返；merge 只改传入字段', async () => {
@@ -41,9 +38,9 @@ describe('品牌资产包', () => {
   });
 
   test('未配置时返回安全默认值（不抛错）', () => {
-    fs.writeFileSync(poster.BRAND_KIT_PATH, JSON.stringify({ companyName: '临时的' }));
+    fs.writeFileSync(tmpPath, JSON.stringify({ companyName: '临时的' }));
     // 手动破坏后 load 应合并默认值（这里直接验证 loadBrandKit 对损坏文件的容错）
-    fs.writeFileSync(poster.BRAND_KIT_PATH, '{broken json');
+    fs.writeFileSync(tmpPath, '{broken json');
     const kit = poster.loadBrandKit();
     expect(kit.companyName).toBe('');
     expect(kit.colors.primary).toBe('#38bdf8');

@@ -9,7 +9,6 @@
  *  - 产品保真：产品照片原样合成，AI 不重绘产品本体
  *  - 产物落 data/workspace/posters（发送企微白名单内）
  */
-const fs = require('fs').promises;
 const fsSync = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');

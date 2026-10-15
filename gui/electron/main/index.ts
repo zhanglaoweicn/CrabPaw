@@ -3669,13 +3669,16 @@ app.whenReady().then(async () => {
 //    后端加载图片(FileBrowser 缩略图)与 TTS 音频(<audio> src=localhost:38767)。
 // 5) frame-src 放行 http/https——web-preview 场景卡以 sandbox(无 allow-same-origin)
 //    iframe 内嵌后端生成的预览页(既有功能,沙箱已隔离)。
-// 6) style-src 保留 'unsafe-inline'(React 行内 style 属性)并放行 Google Fonts
-//    @import;font-src 放行 fonts.gstatic.com(维持现有字体渲染,不回归)。
+// 6) style-src 保留 'unsafe-inline'(React 行内 style 属性)。**不再放行 Google Fonts**：
+//    2026-09-30 离线地基修复——UI 字体改为随包自托管子集(gui/src/assets/fonts/，
+//    由 scripts/fetch-inter-fonts.js 生成)，字体加载零网络请求，故 style-src/font-src
+//    去掉 fonts.googleapis.com / fonts.gstatic.com。对"买 U 盘、不装环境、随身离线"的
+//    产品，放行外网字体等于把首屏渲染绑在网络可用性上。
 const CSP_HTTP = [
   "default-src 'self'",
   "script-src 'self'",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  'font-src https://fonts.gstatic.com',
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
   "img-src 'self' data: blob: http://localhost:* http://127.0.0.1:* https://*.hdslb.com https://*.bilibili.com https://*.basemaps.cartocdn.com https://*.is.autonavi.com",
   "media-src 'self' blob: data: http://localhost:* http://127.0.0.1:* https://*.bilivideo.com https://*.bilibili.com",
   "connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*",
@@ -3741,8 +3744,8 @@ function setupCspInjection() {
     ? [
         "default-src 'self'",
         `script-src 'self' 'sha256-${themeHash}'`,
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-        'font-src https://fonts.gstatic.com',
+        "style-src 'self' 'unsafe-inline'",
+        "font-src 'self' data:",
         // 2026-08-16: 媒体卡需 https 外部源——B站视频直链(bilivideo)与封面图(hdslb/bilibili),
         // 缺则打包版视频黑屏/缩略图不加载(dev 不注入 CSP 不受影响)
         "img-src 'self' data: blob: http://localhost:* http://127.0.0.1:* https://*.hdslb.com https://*.bilibili.com https://*.basemaps.cartocdn.com https://*.is.autonavi.com",

@@ -6,12 +6,14 @@
 //
 // state 槽位按 useState 调用顺序(改动 useVoiceChatFlow 的 state 定义前先核对本表):
 // 0 transcript / 1 aiText / 2 isSpeaking / 3 speakingSegment / 4 pending /
-// 5 replyCompleted / 6 toolEvents / 7 currentThinking
+// 5 replyCompleted / 6 toolEvents / 7 currentThinking / 8 generatedFiles /
+// 9 imageGenSlots
 const mockStateSlots: Array<{ value: unknown; set: (v: unknown) => void }> = []
 
 vi.mock('react', () => ({
   useState: (init: unknown) => {
-    const slot = { value: init, set: (v: unknown) => { slot.value = v } }
+    // 2026-10-09: 支持函数式更新(prev => next)——React 语义; 生图收集测试依赖它
+    const slot = { value: init, set: (v: unknown) => { slot.value = typeof v === 'function' ? (v as (p: unknown) => unknown)(slot.value) : v } }
     mockStateSlots.push(slot)
     return [slot.value, slot.set]
   },
@@ -41,6 +43,10 @@ import { useVoiceChatFlow } from './useVoiceChatFlow'
 
 const THINKING_SLOT = 7
 const currentThinking = () => mockStateSlots[THINKING_SLOT]?.value as string
+// 2026-10-09 生图展示修复: generatedFiles 槽(hook 返回值是渲染期快照, mock 下需读槽取最新值)
+const GENERATED_SLOT = 8
+const generatedFiles = () => (mockStateSlots[GENERATED_SLOT]?.value as Array<{ path: string }>) || []
+// 2026-10-10 生图任务卡: imageGenSlots 槽(经 hook 返回值直读, 免索引漂移)
 // 2026-08-14 ag-ui 二次分析: stopGenerating 终态断言用的槽位
 const PENDING_SLOT = 4
 const REPLY_DONE_SLOT = 5
@@ -211,5 +217,113 @@ describe('断线补投（run:finished 全文兜底, 2026-09-06）', () => {
     sseState.handlers['run:finished']({ status: 'error', userId: 'voice_shell_user', ts: Date.now(), content: 'x' })
     sseState.handlers['run:finished']({ status: 'finished', userId: 'voice_shell_user', ts: Date.now(), content: '' })
     expect(aiTextNow()).toBe('')
+  })
+})
+
+// ==================== 生图展示修复(2026-10-09) ====================
+describe('useVoiceChatFlow 生图文件收集（file_generated → generatedFiles）', () => {
+  let sendOpts: Record<string, (...args: any[]) => void> = {}
+  const flowGen = () => useVoiceChatFlow({ replyEnabled: false, continuousMode: false } as any, false)
+  beforeEach(() => {
+    mockStateSlots.length = 0
+    sseState.handlers = {}
+    sendOpts = {}
+    mockSend.mockReset()
+    mockSend.mockImplementation(async (_msg: unknown, opts: unknown) => { Object.assign(sendOpts, opts) })
+    ;(globalThis as any).window = { __ttsStreamStarted: false }
+  })
+
+  test('file_generated(type=image) 收集进 generatedFiles', async () => {
+    const f = flowGen()
+    await f.sendText('生成一组咖啡杯电商图')
+    sendOpts.onFileGenerated?.({ type: 'image', path: 'D:/img/agnes_a.png' })
+    sendOpts.onFileGenerated?.({ type: 'image', path: 'D:/img/agnes_b.png' })
+    expect(generatedFiles().map(x => x.path)).toEqual(['D:/img/agnes_a.png', 'D:/img/agnes_b.png'])
+  })
+
+  test('非 image 类型忽略', async () => {
+    const f = flowGen()
+    await f.sendText('生成一个网页')
+    sendOpts.onFileGenerated?.({ type: 'html', path: 'D:/x/a.html' })
+    expect(generatedFiles()).toEqual([])
+  })
+
+  test('同路径去重(并行出图重试/重复事件不产生重复气泡)', async () => {
+    const f = flowGen()
+    await f.sendText('生成一组咖啡杯电商图')
+    sendOpts.onFileGenerated?.({ type: 'image', path: 'D:/img/agnes_a.png' })
+    sendOpts.onFileGenerated?.({ type: 'image', path: 'D:/img/agnes_a.png' })
+    expect(generatedFiles()).toHaveLength(1)
+  })
+})
+
+// ==================== 生图任务卡槽位生命周期(2026-10-10) ====================
+describe('useVoiceChatFlow 生图任务卡槽位（ImageGenCard 数据源）', () => {
+  let sendOpts: Record<string, (...args: any[]) => void> = {}
+  const flowCard = () => useVoiceChatFlow({ replyEnabled: false, continuousMode: false } as any, false)
+  // mock 下 hook 返回值是渲染期快照(set 替换引用不重渲染)——读槽取最新值
+  const slots = () => (mockStateSlots[9]?.value as Array<Record<string, unknown>>) || []
+  beforeEach(() => {
+    mockStateSlots.length = 0
+    sseState.handlers = {}
+    sendOpts = {}
+    mockSend.mockReset()
+    mockSend.mockImplementation(async (_msg: unknown, opts: unknown) => { Object.assign(sendOpts, opts) })
+    ;(globalThis as any).window = { __ttsStreamStarted: false }
+  })
+  const IMG_RESULT_PAYLOAD = {
+    success: true,
+    error: null,
+    // 真实载荷双层: registry 包装 {success, content: "<handler 响应 JSON>"}
+    content: JSON.stringify({
+      success: true,
+      content: JSON.stringify({
+        success: true,
+        content: 'Image generation completed',
+        image_path: 'D:\img\agnes_1.png',
+        images: [{ file_path: 'D:\img\agnes_1.png' }],
+      }),
+    }),
+  }
+
+  test('tool_call 建槽(running + 提示词摘要)', async () => {
+    const f = flowCard()
+    await f.sendText('生成一组咖啡杯电商图')
+    sendOpts.onToolCall?.({ status: 'running', toolName: 'ImageGenerate', toolId: 'call_1', toolArgs: JSON.stringify({ prompt: '白底主图 旅行咖啡杯', aspectRatio: '1:1' }) })
+    expect(slots()).toHaveLength(1)
+    expect(slots()[0]).toMatchObject({ toolId: 'call_1', status: 'running', prompt: '白底主图 旅行咖啡杯' })
+  })
+
+  test('非 ImageGenerate 调用不建槽', async () => {
+    const f = flowCard()
+    await f.sendText('今天天气如何')
+    sendOpts.onToolCall?.({ status: 'running', toolName: 'WebSearch', toolId: 'call_x', toolArgs: '{}' })
+    expect(slots()).toHaveLength(0)
+  })
+
+  test('tool_result 回填状态与图片路径(双层 JSON 解析)', async () => {
+    const f = flowCard()
+    await f.sendText('生成一组咖啡杯电商图')
+    sendOpts.onToolCall?.({ status: 'running', toolName: 'ImageGenerate', toolId: 'call_1', toolArgs: '{"prompt":"主图"}' })
+    sendOpts.onToolResult?.({ toolId: 'call_1', success: true, result: '', cardState: 'done', resultPayload: IMG_RESULT_PAYLOAD, toolName: 'ImageGenerate' })
+    expect(slots()[0].status).toBe('done')
+    expect(slots()[0].imagePath).toBe('D:\img\agnes_1.png')
+  })
+
+  test('resultPayload 缺失时 file_generated 兜底补图(FIFO 首个无图 running 槽)', async () => {
+    const f = flowCard()
+    await f.sendText('生成一组咖啡杯电商图')
+    sendOpts.onToolCall?.({ status: 'running', toolName: 'ImageGenerate', toolId: 'call_1', toolArgs: '{"prompt":"主图"}' })
+    sendOpts.onFileGenerated?.({ type: 'image', path: 'D:/img/from_event.png' })
+    expect(slots()[0].imagePath).toBe('D:/img/from_event.png')
+  })
+
+  test('新一轮 sendText 清空槽位(代际隔离)', async () => {
+    const f = flowCard()
+    await f.sendText('第一轮')
+    sendOpts.onToolCall?.({ status: 'running', toolName: 'ImageGenerate', toolId: 'call_old', toolArgs: '{}' })
+    expect(slots()).toHaveLength(1)
+    await f.sendText('第二轮')
+    expect(slots()).toHaveLength(0)
   })
 })

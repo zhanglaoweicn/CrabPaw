@@ -20,6 +20,7 @@ const profileArg = profileIdx >= 0 ? process.argv[profileIdx + 1] : null;
 let fail = 0;
 let total = 0;
 let signed = 0;
+let skipCount = 0; // 因缺 manifest 而计入失败的目录数（汇总行如实报告）
 let profileApplied = false; // --profile 且清单成功解析并应用时为 true(汇总行标注)
 
 // 单条结果输出——逐字节保持 B6 的 check() 格式
@@ -31,15 +32,36 @@ function printResult(it) {
   total++;
 }
 
-function scan(root) {
-  try {
-    fs.readdirSync(root, { withFileTypes: true }); // 目录探测——ENOENT warn 语义与 B6 一致
-  } catch (e) {
-    console.warn('[verify-plugins] 扫描目录失败:', e && e.message);
-    return;
+/**
+ * 扫描一个插件目录。
+ * 2026-09-30 深度检查修复（门禁空转）: 此前目录缺失只 warn 一句就继续，最终仍打印
+ * 「全部通过 ✓」——实测 plugins/bundled 根本不存在，门禁却报绿灯；目录里没有 manifest
+ * 的包也被静默跳过（README 称 14 个插件，门禁实际只覆盖 8 个）。
+ * 现改为：必需目录缺失 = 失败；每个无 manifest 的目录登记为失败（要么补 manifest，要么
+ * 移出 plugins/）；汇总行如实报告覆盖数与被跳过项。
+ *
+ * @param {string} root         待扫描目录
+ * @param {{required?: boolean}} [opts] required=true 时目录缺失计入失败
+ */
+function scan(root, opts = {}) {
+  const requireDir = opts.required !== false;
+  const r = verifyPluginsInDir(root, { requireDir });
+  if (r.missingDirs.length) {
+    if (requireDir) {
+      console.error(`✗ 插件目录不存在: ${root}（该目录为门禁必需：不存在即失败，不允许静默通过）`);
+      fail++;
+    } else {
+      console.warn(`⚠️ 可选插件目录不存在，跳过: ${root}`);
+    }
   }
-  const r = verifyPluginsInDir(root);
   for (const it of r.results) printResult(it);
+  for (const name of r.skipped) {
+    console.error(`✗ ${path.join(root, name)}: 缺少 manifest.yaml/manifest.json（无法校验——请补 manifest 或移出 plugins/）`);
+    skipCount++;
+    fail++;
+    total++;
+  }
+  return r;
 }
 
 if (profileArg) {
@@ -66,7 +88,12 @@ if (profileArg) {
         console.error(`✗ profile ${profileArg} 引用插件目录不存在: ${mref}`);
         fail++; total++;
       }
-      if (r.results.length === 0 && r.missingRefs.length === 0) {
+      // 2026-09-30: profile 点名但缺 manifest 的目录同样可见并计失败
+      for (const name of r.skipped || []) {
+        console.error(`✗ profile ${profileArg} 引用的 ${name} 缺少 manifest.yaml/manifest.json（无法校验）`);
+        skipCount++; fail++; total++;
+      }
+      if (r.results.length === 0 && r.missingRefs.length === 0 && (r.skipped || []).length === 0) {
         console.error('⚠️ profile ' + profileArg + ' 清单为空或无可用目录——门禁拒绝空通过');
         process.exit(1);
       }
@@ -75,10 +102,13 @@ if (profileArg) {
     console.warn(`⚠️ 读取 config.yaml plugins.profiles 失败(${e.message}) → 回退全量`);
     missingProfile = true;
   }
-  if (missingProfile) { scan(path.resolve(ROOT, 'plugins')); scan(path.resolve(ROOT, 'plugins', 'bundled')); }
+  if (missingProfile) { scan(path.resolve(ROOT, 'plugins')); scan(path.resolve(ROOT, 'plugins', 'bundled'), { required: false }); }
 } else {
-  scan(path.resolve(ROOT, 'plugins')); scan(path.resolve(ROOT, 'plugins', 'bundled'));
+  // plugins/ 为必需（仓库内置插件目录）；plugins/bundled/ 为可选层（此前缺失却照报通过）
+  scan(path.resolve(ROOT, 'plugins'));
+  scan(path.resolve(ROOT, 'plugins', 'bundled'), { required: false });
 }
 
-console.log(`\n📦 插件门禁${profileApplied ? `(profile=${profileArg})` : ''}: ${total} 个插件（签名 ${signed}）→ ${fail === 0 ? '全部通过 ✓' : fail + ' 个失败 ✗'}`);
+const skipNote = skipCount > 0 ? `，另有 ${skipCount} 个目录缺 manifest 计入失败` : '';
+console.log(`\n📦 插件门禁${profileApplied ? `(profile=${profileArg})` : ''}: ${total} 个插件（签名 ${signed}）→ ${fail === 0 ? '全部通过 ✓' : fail + ' 个失败 ✗'}${skipNote}`);
 process.exit(fail === 0 ? 0 : 1);

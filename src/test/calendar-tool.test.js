@@ -21,7 +21,7 @@ jest.mock('../core/panel-state', () => ({ setPanelState: jest.fn() }));
 
 const { addEvent } = require('../handlers/calendar-handler');
 const { broadcastEvent } = require('../core/sse-broadcast');
-const { getSceneStore } = require('../core/scene/scene-store');
+require('../core/scene/scene-store');
 const { parseEventTime, handleCreateEvent } = require('../tools/calendar-tool');
 const { validateToolInput, registerIntoRegistry } = require('../core/tool-contract');
 const { registry } = require('../tools/registry');

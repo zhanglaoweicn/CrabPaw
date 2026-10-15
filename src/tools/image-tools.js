@@ -6,7 +6,7 @@ const path = require('path');
 
 const { registry } = require('./registry');
 
-const { CONFIG_PATH, loadConfig, DATA_DIR } = require('../core/config');
+const { CONFIG_PATH, loadConfig } = require('../core/config');
 
 const { redactText, _maskToken } = require('../core/secret-redactor');
 
@@ -45,62 +45,15 @@ function getImageUrl(filePath) {
 
   if (!filePath) return null;
 
-  
-
   const normalizedPath = filePath.replace(/\\/g, '/');
 
-  
-
-  const isElectron = !!process.versions.electron;
-
-  if (isElectron) {
-
-    // 使用 local:/// 避免 Chromium 将 Windows 盘符 (如 C:) 解析为主机名
-    return `local:///${normalizedPath.replace(/\\/g, '/')}`;
-
-  }
-
-  
-
-  const apiPort = parseInt(process.env.API_PORT || '38767', 10);
-
-  const dataDir = DATA_DIR || process.env.CRABPAW_DATA_DIR || '';
-
-  let relativePath = filePath;
-
-  if (dataDir && filePath.startsWith(dataDir)) {
-
-    relativePath = filePath.substring(dataDir.length).replace(/^[\\/]+/, '');
-
-  } else {
-
-    const genIdx = normalizedPath.indexOf('generated-images/');
-
-    if (genIdx >= 0) {
-
-      relativePath = normalizedPath.substring(genIdx);
-
-    } else {
-
-      const ssIdx = normalizedPath.indexOf('screenshots/');
-
-      if (ssIdx >= 0) {
-
-        relativePath = normalizedPath.substring(ssIdx);
-
-      } else {
-
-        relativePath = path.basename(filePath);
-
-      }
-
-    }
-
-  }
-
-  relativePath = relativePath.replace(/\\/g, '/');
-
-  return `http://localhost:${apiPort}/files/${encodeURIComponent(relativePath).replace(/%2F/g, '/')}`;
+  // 2026-10-09 修复 URL 双轨分裂: 统一返回 local:/// ——此前非 Electron 进程
+  // (后端为纯 node)返回 http://localhost:PORT/files/..., 该端点要求鉴权, 而
+  // <img> 标签带不了 Bearer → 模型把工具结果里的 Preview URL 复制进回复后
+  // 在桌面端必然 401 裂图(用户实测)。桌面 GUI 是该 URL 的唯一图形消费方
+  // (local:/// 走 Electron 协议处理器, 带白名单校验); 企微/飞书通道发原图
+  // (wecom_send), 不依赖此 URL; 浏览器模式经任务面板文件列表访问。
+  return `local:///${normalizedPath}`;
 
 }
 
@@ -1356,11 +1309,18 @@ async function handleImageGenerate(params, context) {
 
   let effectivePrompt = prompt;
   if (enhance_prompt) {
-    try {
-      const enhanced = await enhancePrompt(prompt, { imageType: aspectRatio || '1:1' });
-      effectivePrompt = enhanced.enhanced || prompt;
-    } catch (e) {
-      console.warn('Prompt enhancement failed, using original:', e.message);
+    // 2026-10-09: 风格库契约保护——handraw-style 等技能产出的提示词已按库内
+    // 契约精调(风格名称/参考作者/核心风格特征锚点), 通用 LLM 增强会稀释风格
+    // 锚点、抹掉构图留白。含契约标记的提示词跳过二次增强。
+    if (/(风格名称：|参考作者\/风格名称|核心风格特征：)/.test(prompt)) {
+      console.log('🎨 [ImageGenerate] 检测到风格库契约提示词, 跳过通用增强');
+    } else {
+      try {
+        const enhanced = await enhancePrompt(prompt, { imageType: aspectRatio || '1:1' });
+        effectivePrompt = enhanced.enhanced || prompt;
+      } catch (e) {
+        console.warn('Prompt enhancement failed, using original:', e.message);
+      }
     }
   }
 
@@ -1416,6 +1376,11 @@ async function handleImageGenerate(params, context) {
       const previewUrl = previews[0];
       contentText += `### Preview\n\n${previewUrl ? `![Preview](${previewUrl})` : 'No preview available'}\n\n`;
     }
+
+    // 2026-10-09 生图体验治理: 结果文本尾部直接携带回复纪律——模型倾向逐字复读
+    // 本段文本(实测两轮都把 "Image generation completed **Prompt**:..." 原文粘进
+    // 回复), 把要求写在它复读的文本里比写在工具描述里更有效。
+    contentText += `\n[回复要求] ① 用一两句中文自然告知图片已生成, 严禁原样复述以上 JSON/Prompt/Size 等字段文本; ② 若存在多张图片, 用一行文字概括即可, 用户界面已通过图片气泡展示全部图片, 无需在回复里逐张插入图片链接。`;
 
     let wecomSendResult = null;
     if (send_to_wecom && images.length > 0 && images[0].filePath) {
@@ -1602,7 +1567,7 @@ registry.register({
 
 registry.register({
   name: 'ImageGenerate',
-  description: 'Generate images using AI from text prompts via supported providers (OpenAI DALL-E, Doubao, Stability AI, etc.)',
+  description: 'Generate images using AI from text prompts via supported providers (OpenAI DALL-E, Doubao, Stability AI, Agnes, etc.). 回复纪律(必须遵守): ① 每张成功生成的图片会由界面自动以图片气泡展示给用户——回复只需 1-2 句自然语言告知已生成及内容概要, 严禁在回复里逐张插入 Markdown 图片链接(语音模式尤其会念出乱码); ② 严禁原样复述本工具返回的 JSON/text/Prompt/Size 等字段文本; ③ 严禁承诺"稍后会自动发送"(无此机制, 图片当场即已展示)。',
   schema: {
     type: 'object',
     properties: {

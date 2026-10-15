@@ -11,14 +11,20 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { escapeHtml } = require('./escape');
 const { TEMPLATES } = require('./templates');
 
 // 2026-09-08: DATA_DIR 单源化——本模块在 src/core/poster/ 下，需上溯三级到仓库根
 // （此前少一层导致产物写进 src/data/，实测冒烟抓包）
 const { DATA_DIR } = require('../config');
-const BRAND_KIT_PATH = path.join(DATA_DIR, '..', 'workspace', 'brand-kit.json');
+let BRAND_KIT_PATH = path.join(DATA_DIR, '..', 'workspace', 'brand-kit.json');
 const POSTER_OUTPUT_DIR = path.join(DATA_DIR, '..', 'workspace', 'posters');
+
+// 2026-10-15: 测试隔离注入口——brand-kit.json 是持久共享存储，多 jest worker
+// 并行时跨进程竞态（poster-generate 全量跑偶发假失败）。测试可改指唯一临时
+// 文件，读写不再触碰真实工作区数据。仅测试使用。
+function setBrandKitPathForTest(p) {
+  BRAND_KIT_PATH = p;
+}
 
 // ─── 尺寸：aspect → [W, H]（≥1920 短边满足 Seedream 最低像素约束）───
 const ASPECT_SIZES = {
@@ -180,5 +186,6 @@ module.exports = {
   ASPECT_SIZES,
   ASPECT_BG_SIZE,
   BRAND_KIT_PATH,
+  setBrandKitPathForTest,
   POSTER_OUTPUT_DIR,
 };

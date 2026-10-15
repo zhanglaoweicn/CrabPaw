@@ -2,7 +2,7 @@
  * decision-recorder.test.js — run 级决策折叠纯函数（SSE 事件 → Decision 记录）
  */
 const {
-  createFoldState, foldRunEvent, sealDecision,
+  createFoldState, foldRunEvent,
   computeRecordHash, computeChecksum, stableStringify,
   CONCLUSION_MAX,
 } = require('../core/memory/decision-recorder');

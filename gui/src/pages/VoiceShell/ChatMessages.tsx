@@ -9,12 +9,19 @@
  * feedbackMap 等）全部改为 props 回调。行为不变由 tsc + vitest + 闸门保证。
  */
 import { toast } from 'sonner'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { rtDeptColor } from '../../hooks/useRoundtable'
 import { isImageAttachment, fileUrlFor, formatFileSize } from '../../lib/attachment'
 import { SUGGESTED_PROMPTS } from '../../lib/voice-panel-commands'
 import type { ChatMsg, ChatMsgFile, FlowToolEvent } from './types'
+
+// 2026-10-09 生图展示: 放行 local:/// 图片协议——react-markdown 默认 URL 消毒器
+// 只认 http/https 等已知协议, 模型内嵌的 ![图片](local:///...) 会被洗成空 src
+// (生图回复在对话卡里表现为裂图/不显示)。local: 走 Electron 协议处理器
+// (主进程白名单+敏感文件黑名单校验), 与附件缩略图 fileUrlFor 同一安全通道。
+const localUrlTransform = (url: string) =>
+  url.startsWith('local:') ? url : defaultUrlTransform(url)
 
 // Markdown 链接组件: 新窗口打开(react-markdown 默认 <a> 在同一窗口覆盖会话)
 export function chatMarkdownLink(props: { href?: string; children?: React.ReactNode }) {
@@ -102,8 +109,10 @@ export function ChatMessageItem({
           </div>
         )}
         <div className={`chatcard-msg-bubble${m.role === 'tool' ? ' chatcard-msg-bubble--tool' : m.role === 'ai' && !m.speaker ? ' chatcard-msg-bubble--md' : ''}`}>
-          {/* 2026-08-21: 用户消息附件——图片缩略图 + 文件 chip，文本之前 */}
-          {m.role === 'user' && m.files && m.files.length > 0 && (
+          {/* 2026-08-21: 消息附件——图片缩略图 + 文件 chip，文本之前。
+              2026-10-09: 放开 role 限定——AI 消息的生成图片用与用户上传同款的
+              缩略图渲染, 此前只对 user 角色渲染, 生图结果在对话流里不可见。 */}
+          {m.files && m.files.length > 0 && (
             <div className="chatcard-attachments">
               {m.files.map((f, i) => (
                 isImageAttachment(f.name) ? (
@@ -338,7 +347,7 @@ export function StreamingBubble({ agentDisplayName, text }: { agentDisplayName: 
       <div className="chatcard-msg-col">
         <div className="chatcard-msg-name chatcard-msg-name--ai">{agentDisplayName}</div>
         <div className="chatcard-msg-bubble chatcard-msg-bubble--md">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: chatMarkdownLink }}>{text}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={localUrlTransform} components={{ a: chatMarkdownLink }}>{text}</ReactMarkdown>
           <span className="chatcard-stream-cursor" aria-hidden="true">▌</span>
         </div>
       </div>

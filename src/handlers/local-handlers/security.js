@@ -101,7 +101,7 @@ async function handleSecurityConfig(req, res, ctx) {
 }
 
 // 2026-08-13 P2-4: 最近运行终态快照(恢复横幅数据源)——GET /api/runs/active?userId=
-async function handleRunsActive(req, res, ctx) {
+async function handleRunsActive(req, res, _ctx) {
   try {
     const { getRunStore } = require('../../core/run-store');
     const url = new URL(req.url, 'http://localhost');

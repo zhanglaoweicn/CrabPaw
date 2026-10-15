@@ -550,15 +550,30 @@ TOOL_CONTRACTS.DashboardGenerate = {
 };
 // ── 知识库检索工具契约（2026-08-20，DeepTutor 精华落地：读取链路闭环；schema 与 registry src/tools/knowledge-tools.js 双写一致）──
 TOOL_CONTRACTS.KbSearch = {
-  description: "Search the local knowledge base (hybrid retrieval: FTS + vector + entity graph RRF fusion). Contains documents previously analyzed via DocumentAnalyze. Returns snippets with provenance (document/file path). Use to answer questions about previously analyzed documents",
+  description: "Search the local knowledge base (hybrid retrieval: FTS + vector + entity graph + memory tree RRF fusion). Contains documents previously analyzed via DocumentAnalyze and session archives. Returns depth-layered snippets (abstract by default) with provenance refs; use ContextDrillDown to fetch full content of a hit",
   whenNotToUse: ["Don't use for web search — use WebSearch", "Don't use for local file content search — use Grep", "Don't use just to see which documents exist — use KbList", "When knowledge base is empty, return empty honestly — never fabricate results"],
-  schema: { type: "object", properties: { query: { type: "string", minLength: 1 }, limit: { type: "number", minimum: 1, maximum: 10 }, namespace: { type: "string" } }, required: ["query"], additionalProperties: false },
+  // 2026-10-09 分层加载协议: 补 depth 参数(abstract/overview/full,默认 abstract 省 token)。
+  // 契约不强枚举——handler 侧 normalizeDepth 对大小写/别名(L0/中文)均可容忍,非法值回落 abstract。
+  schema: { type: "object", properties: { query: { type: "string", minLength: 1 }, limit: { type: "number", minimum: 1, maximum: 10 }, namespace: { type: "string" }, depth: { type: "string" } }, required: ["query"], additionalProperties: false },
   maxTimeout: 30000, riskLevel: "low", validate: null
 };
 TOOL_CONTRACTS.KbList = {
   description: "List knowledge base documents (title/source/updated). For 'what documents exist' and coverage checks before retrieval. Manifest ≠ retrieval evidence: listing only answers 'what exists'; cite content only after KbSearch",
   whenNotToUse: ["Need document content — use KbSearch (manifest has no content)", "Empty knowledge base — return empty list honestly"],
   schema: { type: "object", properties: { limit: { type: "number", minimum: 1, maximum: 100 }, titleContains: { type: "string" }, namespace: { type: "string" } }, required: [], additionalProperties: false },
+  maxTimeout: 15000, riskLevel: "low", validate: null
+};
+// ── 2026-10-09 分层加载协议工具契约（OpenViking ov_read/ls 精华落地；schema 与 registry src/tools/context-depth-tools.js 双写一致）──
+TOOL_CONTRACTS.ContextDrillDown = {
+  description: "Fetch deeper content for a context asset by ref (layered-loading escalation step). Retrieval tools return abstract-level snippets with refs by default; call this to expand a hit to overview/full content. Sources: kb (knowledge chunk/document full text), memory (memory entry full text), tree (memory-tree node + child summaries), archive (archived long-message original)",
+  whenNotToUse: ["Don't use as a search engine — it only fetches an already-located ref, use KbSearch to search", "Don't drill when the abstract already answers the question (layered loading exists to save tokens)", "For source=archive, path must come from an archive reference in tool output — arbitrary file reads use Read"],
+  schema: { type: "object", properties: { ref: { type: "object", properties: { source: { type: "string", enum: ["kb", "memory", "tree", "archive"] }, id: { type: "string" }, treeId: { type: "string" }, path: { type: "string" } }, required: ["source"] }, depth: { type: "string" } }, required: ["ref"], additionalProperties: false },
+  maxTimeout: 15000, riskLevel: "low", validate: null
+};
+TOOL_CONTRACTS.ContextBrowse = {
+  description: "Browse the context asset catalog (layered-loading ls/tree step): memory-tree digests (per-tree level distribution, pending leaves, top summary) and knowledge-base coverage overview. Use for 'what do you remember / what's in your context' and to see structure before drilling down",
+  whenNotToUse: ["Don't use to find specific content — browse returns structure and digests only; search with KbSearch or drill with ContextDrillDown", "Don't browse before every retrieval — retrieval results already carry refs"],
+  schema: { type: "object", properties: { namespace: { type: "string" } }, required: [], additionalProperties: false },
   maxTimeout: 15000, riskLevel: "low", validate: null
 };
 TOOL_CONTRACTS.DecisionTrace = {
@@ -987,18 +1002,24 @@ TOOL_CONTRACTS.HttpRequest = {
   maxTimeout: 60000, riskLevel: "low", validate: null
 };
 TOOL_CONTRACTS.DatabaseQuery = {
-  description: "查询数据库。支持 SQLite（文件路径）、MySQL/PostgreSQL（host/user/password）。安全限制：只允许 SELECT 类只读操作，SQLite 文件必须在工作目录内。",
+  description: "查询数据库。支持 SQLite（文件路径）、MySQL/PostgreSQL（host/user/password）。安全限制：只允许 SELECT 类只读操作，SQLite 文件必须在工作目录内。已保存数据源（DatabaseConfig save）未传连接参数时自动回退默认数据源。",
   whenNotToUse: [],
-  schema: {"type":"object","properties":{"type":{"type":"string","enum":["sqlite","mysql","postgresql"],"description":"数据库类型","default":"sqlite"},"database":{"type":"string","description":"数据库名（SQLite：文件路径；MySQL/PostgreSQL：数据库名）"},"query":{"type":"string","description":"SQL 查询语句。只允许 SELECT/PRAGMA/EXPLAIN/ANALYZE/WITH 查询"},"question":{"type":"string","description":"自然语言问句（NL 路径，自动转 SQL）。与 query 二选一"},"host":{"type":"string","description":"数据库主机地址（MySQL/PostgreSQL 需要）"},"port":{"type":"number","description":"数据库端口"},"user":{"type":"string","description":"数据库用户名"},"password":{"type":"string","description":"数据库密码"}},"anyOf":[{"required":["query"]},{"required":["question"]}],"additionalProperties":false},
+  schema: {"type":"object","properties":{"type":{"type":"string","enum":["sqlite","mysql","postgresql"],"description":"数据库类型","default":"sqlite"},"connection":{"type":"string","description":"已保存数据源名（DatabaseConfig save 过）。未传时回退默认数据源"},"database":{"type":"string","description":"数据库名（SQLite：文件路径；MySQL/PostgreSQL：数据库名）"},"query":{"type":"string","description":"SQL 查询语句。只允许 SELECT/PRAGMA/EXPLAIN/ANALYZE/WITH 查询"},"question":{"type":"string","description":"自然语言问句（NL 路径，自动转 SQL）。与 query 二选一"},"host":{"type":"string","description":"数据库主机地址（MySQL/PostgreSQL 需要）"},"port":{"type":"number","description":"数据库端口"},"user":{"type":"string","description":"数据库用户名"},"password":{"type":"string","description":"数据库密码"}},"anyOf":[{"required":["query"]},{"required":["question"]}],"additionalProperties":false},
   maxTimeout: 60000, riskLevel: "low", validate: null
 };
 
 // 2026-08-07: NL2SQL 工具契约（nl2sql eval 套件依赖；此前缺失导致启动探针 98.4% 自杀）
 TOOL_CONTRACTS.ListTables = {
-  description: "列出数据库中的表",
+  description: "列出数据库中的表。已保存数据源（DatabaseConfig save）可只传 connection 或省略连接参数。",
   whenNotToUse: [],
-  schema: {"type":"object","properties":{"type":{"type":"string","enum":["sqlite","mysql","postgresql"],"description":"数据库类型"},"database":{"type":"string","description":"数据库名（SQLite：文件路径）"}},"required":["type","database"],"additionalProperties":false},
+  schema: {"type":"object","properties":{"type":{"type":"string","enum":["sqlite","mysql","postgresql"],"description":"数据库类型"},"connection":{"type":"string","description":"已保存数据源名。未传时回退默认数据源"},"database":{"type":"string","description":"数据库名（SQLite：文件路径）"},"host":{"type":"string","description":"数据库主机地址"},"port":{"type":"number","description":"数据库端口"},"user":{"type":"string","description":"数据库用户名"},"password":{"type":"string","description":"数据库密码"}},"anyOf":[{"required":["type","database"]},{"required":["connection"]}],"additionalProperties":false},
   maxTimeout: 30000, riskLevel: "low", validate: null
+};
+TOOL_CONTRACTS.DatabaseConfig = {
+  description: "管理已保存的数据库数据源（命名连接）：save 保存后密码加密落盘，此后 DatabaseQuery/ListTables 不传连接参数时自动回退默认数据源——用户首次给出连接信息时主动调用 save。list 查看清单（密码掩码），remove 删除，set-default 切换默认，test 验证连通性。",
+  whenNotToUse: ["执行数据查询用 DatabaseQuery"],
+  schema: {"type":"object","properties":{"action":{"type":"string","enum":["save","list","remove","set-default","test"],"description":"操作类型"},"name":{"type":"string","description":"数据源名（save/remove/set-default/test 用）"},"type":{"type":"string","enum":["sqlite","mysql","postgresql"],"description":"数据库类型（save 必填）"},"host":{"type":"string","description":"数据库主机地址（save MySQL/PostgreSQL 必填）"},"port":{"type":"number","description":"端口（默认 MySQL 3306 / PostgreSQL 5432）"},"database":{"type":"string","description":"数据库名（SQLite 为文件路径）"},"user":{"type":"string","description":"数据库用户名"},"password":{"type":"string","description":"密码（save 必填；加密落盘，结果中只回显掩码）"},"setDefault":{"type":"boolean","description":"是否设为默认数据源（首个保存的自动成为默认）"}},"required":["action"],"additionalProperties":false},
+  maxTimeout: 30000, riskLevel: "medium", validate: null
 };
 TOOL_CONTRACTS.DescribeTable = {
   description: "查看表结构（拒绝危险表名）",
